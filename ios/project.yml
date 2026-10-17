@@ -1,0 +1,81 @@
+# XcodeGen 프로젝트 정의. Xcode 프로젝트는 커밋하지 않고 이 파일로 생성한다.
+#   brew install xcodegen && cd ios && xcodegen generate
+name: WeatherBridge
+
+options:
+  bundleIdPrefix: io.github.swpark3179
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Apple Developer 가입 후 팀 ID를 넣는다 (docs/setup.md)
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  WeatherCore:
+    path: Packages/WeatherCore
+
+targets:
+  WeatherBridge:
+    type: application
+    platform: iOS
+    sources:
+      - path: WeatherBridge
+      - path: Shared
+    dependencies:
+      - package: WeatherCore
+      - target: CommuteWidget
+    info:
+      path: WeatherBridge/Info.plist
+      properties:
+        CFBundleDisplayName: WeatherBridge
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSSupportsLiveActivities: true
+        UIBackgroundModes: [remote-notification]
+    entitlements:
+      path: WeatherBridge/WeatherBridge.entitlements
+      properties:
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.swpark3179.weatherbridge
+
+  CommuteWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CommuteWidget
+      - path: Shared
+    dependencies:
+      - package: WeatherCore
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: CommuteWidget/Info.plist
+      properties:
+        CFBundleDisplayName: WeatherBridge
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.swpark3179.weatherbridge.CommuteWidget
+
+schemes:
+  WeatherBridge:
+    build:
+      targets:
+        WeatherBridge: all
+        CommuteWidget: all
+    run:
+      config: Debug
+    archive:
+      config: Release
