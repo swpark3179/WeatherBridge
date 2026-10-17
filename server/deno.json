@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "fmt:check": "deno fmt --check",
+    "lint": "deno lint",
+    "check": "deno check supabase/functions/spike-reach/index.ts supabase/functions/spike-apns/index.ts tests/",
+    "test": "deno test --allow-read=.,../ios/Packages/WeatherCore/Tests tests/"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1"
+  },
+  "fmt": {
+    "lineWidth": 100
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  }
+}

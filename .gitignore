@@ -1,0 +1,18 @@
+.DS_Store
+
+# Xcode — 프로젝트와 plist/entitlements는 ios/project.yml에서 XcodeGen이 생성한다
+ios/WeatherBridge.xcodeproj/
+ios/WeatherBridge/Info.plist
+ios/WeatherBridge/WeatherBridge.entitlements
+ios/CommuteWidget/Info.plist
+ios/build.log
+xcuserdata/
+DerivedData/
+
+# Swift Package
+.build/
+.swiftpm/
+
+# 비밀값
+.env
+*.p8

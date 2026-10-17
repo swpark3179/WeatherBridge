@@ -1,0 +1,38 @@
+{
+  "aps": {
+    "timestamp": 1792360800,
+    "event": "start",
+    "content-state": {
+      "headline": "☔ 회사 15–18시 최대 70%",
+      "highlight": true,
+      "places": [
+        {
+          "name": "집",
+          "temp": 12,
+          "pops": [0, 0, 10, 10, 10, 10, 20, 20, 20, 10, 10, 10, 0, 0, 0, 0, 0],
+          "maxPop": 20,
+          "rainWindow": null
+        },
+        {
+          "name": "회사",
+          "temp": 15,
+          "pops": [0, 0, 10, 10, 20, 30, 40, 50, 60, 70, 60, 40, 20, 10, 0, 0, 0],
+          "maxPop": 70,
+          "rainWindow": "15–18시"
+        }
+      ],
+      "updatedAt": 1792360800
+    },
+    "attributes-type": "CommuteActivityAttributes",
+    "attributes": {
+      "windowEnd": 1792364400,
+      "firstHour": 7
+    },
+    "alert": {
+      "title": "출근 날씨 브리핑",
+      "body": "☔ 회사 15–18시 최대 70%"
+    },
+    "stale-date": 1792364400,
+    "input-push-channel": "dHN0LXNyY2gtY2hubA=="
+  }
+}
