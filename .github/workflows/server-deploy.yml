@@ -1,0 +1,61 @@
+name: Server deploy
+
+# 마이그레이션 적용 + 함수 시크릿 동기화 + Edge Functions 배포.
+# 필요한 Actions secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID, SPIKE_TOKEN
+# (선택) KMA_SERVICE_KEY — 있으면 함수 시크릿으로 함께 등록한다. 자세한 내용은 docs/setup.md
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["server/supabase/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        run: |
+          missing=""
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD PROJECT_ID; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Actions secrets가 없습니다:$missing (docs/setup.md 참고)"
+            exit 1
+          fi
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_ID"
+      - name: Apply migrations
+        run: supabase db push
+      - name: Sync function secrets
+        env:
+          SPIKE_TOKEN: ${{ secrets.SPIKE_TOKEN }}
+          KMA_SERVICE_KEY: ${{ secrets.KMA_SERVICE_KEY }}
+        run: |
+          args=()
+          [ -n "$SPIKE_TOKEN" ] && args+=("SPIKE_TOKEN=$SPIKE_TOKEN")
+          [ -n "$KMA_SERVICE_KEY" ] && args+=("KMA_SERVICE_KEY=$KMA_SERVICE_KEY")
+          if [ ${#args[@]} -gt 0 ]; then
+            supabase secrets set --project-ref "$PROJECT_ID" "${args[@]}"
+          fi
+          [ -n "$KMA_SERVICE_KEY" ] || echo "::notice::KMA_SERVICE_KEY가 없어 기상청 소스 없이 동작합니다"
+      - name: Deploy functions
+        run: supabase functions deploy --project-ref "$PROJECT_ID"

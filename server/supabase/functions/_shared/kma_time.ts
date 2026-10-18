@@ -23,6 +23,35 @@ export function latestVilageBase(nowMs: number, delayMinutes = 15): KmaBase {
   return { baseDate: ymd(prevDay), baseTime: hh00(23) };
 }
 
+/** 이 발표 다음 단기예보가 조회 가능해지는 시각(epoch 초). 캐시 만료 기준. */
+export function nextVilageAvailableAt(base: KmaBase, delayMinutes = 15): number {
+  const issued = kstToEpoch(base.baseDate, base.baseTime);
+  const hour = Number(base.baseTime.slice(0, 2));
+  const next = VILAGE_BASE_HOURS.find((h) => h > hour);
+  const gapHours = next === undefined ? 24 - hour + VILAGE_BASE_HOURS[0] : next - hour;
+  return issued + gapHours * 3600 + delayMinutes * 60;
+}
+
+/**
+ * 지금 조회 가능한 가장 최근 초단기실황(getUltraSrtNcst). 매시 정각 관측이 약 40분 뒤 제공된다.
+ */
+export function latestUltraSrtNcstBase(nowMs: number, delayMinutes = 40): KmaBase {
+  const kst = new Date(nowMs + KST_OFFSET_MS - delayMinutes * 60 * 1000);
+  return { baseDate: ymd(kst), baseTime: hh00(kst.getUTCHours()) };
+}
+
+/** 기상청 날짜(YYYYMMDD)·시각(HHMM, KST) → epoch 초 */
+export function kstToEpoch(yyyymmdd: string, hhmm: string): number {
+  const ms = Date.UTC(
+    Number(yyyymmdd.slice(0, 4)),
+    Number(yyyymmdd.slice(4, 6)) - 1,
+    Number(yyyymmdd.slice(6, 8)),
+    Number(hhmm.slice(0, 2)),
+    Number(hhmm.slice(2, 4)),
+  );
+  return (ms - KST_OFFSET_MS) / 1000;
+}
+
 function ymd(d: Date): string {
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day = String(d.getUTCDate()).padStart(2, "0");

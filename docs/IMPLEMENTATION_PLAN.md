@@ -62,16 +62,19 @@ WeatherBridge/
 │  └─ supabase/
 │     ├─ migrations/           스키마, RLS, pg_cron 잡
 │     └─ functions/
-│        ├─ _shared/providers/ kma_short.ts, kma_mid.ts, open_meteo.ts, weatherkit.ts, ...
-│        ├─ _shared/           apns.ts, kma_time.ts, kma_grid.ts, normalize.ts, aggregate.ts,
-│        │                     briefing.ts, schedule.ts, cache.ts, quota.ts, clock.ts
+│        ├─ _shared/providers/ kma.ts(단기예보·실황), open_meteo.ts, (이후) weatherkit.ts, ...
+│        ├─ _shared/           apns.ts, kma_time.ts, kma_grid.ts, forecast_types.ts, aggregate.ts,
+│        │                     briefing.ts, forecast_service.ts, db.ts, (이후) schedule.ts, quota.ts
 │        ├─ refresh/           cron: 등록 위치별 예보 수집 → forecast_cache, 예보·관측 로그
 │        ├─ forecast/          장소별 종합 예보 (캐시만 읽음)
 │        ├─ briefing/          요약/출근 카드 가공
 │        ├─ dispatch/          cron 5분: 요약 알림·Live Activity 수명주기 발송
 │        └─ trip-watch/        여행 스냅샷·변화 감지·알림
 ├─ docs/
-└─ .github/workflows/ci.yml    server(Deno) / core(swift test, Linux) / ios(xcodebuild, macOS)
+└─ .github/workflows/
+   ├─ ci.yml                   server(Deno) / core(swift test, Linux) / ios(xcodebuild, macOS)
+   ├─ server-deploy.yml        마이그레이션 + 함수 시크릿 동기화 + 함수 배포
+   └─ server-smoke.yml         배포된 함수 점검 (매일 실행, 무료 프로젝트 일시정지 방지)
 ```
 
 ### 데이터 계약
@@ -107,14 +110,16 @@ WeatherBridge/
 
 ## 3. 단계별 구현 계획
 
-### Phase 0 — 준비 + 기술 검증(스파이크) ← 진행 중
+### Phase 0 — 준비 + 기술 검증(스파이크) ← 완료 (실기기 S2·S3은 개발자 계정 가입 후)
 1. 저장소 골격: XcodeGen 프로젝트(앱 + CommuteWidget, iOS 18), WeatherCore 패키지, `server/` Deno 프로젝트, CI 3개 잡.
 2. iOS 실험실 화면: APNs·push-to-start 토큰 표시, 샘플 Live Activity 로컬 시작/채널 구독 시작/종료.
 3. 서버 스파이크 함수: `spike-reach`(Edge → Open-Meteo·data.go.kr 접근성), `spike-apns`(채널 생성 → push-to-start → 채널 업데이트 → 종료).
 4. 실기기 검증(개발자 계정 필요): push-to-start + `input-push-channel` → 채널 업데이트 → `end` + `stale-date`로 T에 확실히 사라지는지.
 5. 절차·결과 기록: [spikes.md](spikes.md), 계정·키: [setup.md](setup.md).
 
-### Phase 1 — 서버 예보 엔진 (기상청 + Open-Meteo)
+### Phase 1 — 서버 예보 엔진 (기상청 + Open-Meteo) ← 진행 중
+- 배포는 GitHub Actions(`server-deploy`), 점검은 `server-smoke`. 함수는 운영 토큰(`SPIKE_TOKEN`)으로 보호하고 Phase 2에서 사용자 인증으로 전환([decisions.md](decisions.md) D11–D13).
+- 집·회사는 사용자가 SQL로 등록([setup.md](setup.md) "Phase 1 서버 준비").
 1. `kma_grid.ts`(위경도→nx/ny Lambert 변환), base_time 계산(Phase 0의 `kma_time.ts` 확장).
 2. 어댑터: **기상청 단기 + Open-Meteo(ECMWF/GFS/ICON 모델별)** → 첫날부터 4개 독립 계열 비교 가능. 어댑터는 `HourSlot[]` + 메타(발표시각, 범위, 해상도) 반환.
 3. `refresh` cron + `forecast_cache`, `forecast`/`briefing` 함수, `aggregate.ts`.

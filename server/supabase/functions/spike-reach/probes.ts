@@ -1,10 +1,12 @@
 import { latestVilageBase } from "../_shared/kma_time.ts";
 import type { FetchFn } from "../_shared/apns.ts";
+import { kmaUrl } from "../_shared/providers/kma.ts";
+import { OPEN_METEO_MODELS as MODEL_PROVIDERS } from "../_shared/providers/open_meteo.ts";
 
 /** 서울시청 (기상청 격자 60,127) */
 export const SEOUL = { lat: 37.5665, lon: 126.978, nx: 60, ny: 127 };
 
-export const OPEN_METEO_MODELS = ["ecmwf_ifs025", "ncep_gfs_seamless", "dwd_icon_seamless"];
+export const OPEN_METEO_MODELS = Object.keys(MODEL_PROVIDERS);
 
 export interface ProbeResult {
   ok: boolean;
@@ -26,18 +28,7 @@ export function openMeteoUrl(): string {
 }
 
 export function kmaVilageUrl(serviceKey: string, nowMs: number): string {
-  const { baseDate, baseTime } = latestVilageBase(nowMs);
-  const params = new URLSearchParams({
-    serviceKey, // data.go.kr '일반 인증키(Decoding)' 값을 사용 (여기서 인코딩됨)
-    pageNo: "1",
-    numOfRows: "1000",
-    dataType: "JSON",
-    base_date: baseDate,
-    base_time: baseTime,
-    nx: String(SEOUL.nx),
-    ny: String(SEOUL.ny),
-  });
-  return `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?${params}`;
+  return kmaUrl("getVilageFcst", serviceKey, latestVilageBase(nowMs), SEOUL);
 }
 
 /** Open-Meteo 응답에서 모델별 강수확률 열을 요약한다. */
