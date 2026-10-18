@@ -11,3 +11,4 @@
 | D7 | 실기기 배포는 **Apple Developer Program + CI 서명 + TestFlight** | Mac 없이 설치 가능한 유일한 경로. 푸시·Live Activity·WeatherKit에도 멤버십 필요 | 2026-10-17 |
 | D8 | 서버는 **Supabase 서울 리전 무료 티어**, 푸시는 **APNs 직접**(Firebase 미사용) | iOS 전용이라 FCM 불필요. Edge Function(Deno)에서 HTTP/2로 APNs 호출 | 2026-10-17 |
 | D9 | Live Activity 날짜 필드는 **epoch 초(Int)** | ActivityKit의 Date 디코딩 방식에 의존하지 않고 서버와 계약을 단순화 | 2026-10-17 |
+| D10 | Supabase 프로젝트는 **별도 계정**(서울 리전)에 두고, 배포·시크릿은 **사용자 PC의 Supabase CLI**로 수행 | 기존 계정이 무료 프로젝트 한도에 도달. 이 계정은 Claude의 Supabase 연결 밖이라 배포 절차를 문서화([setup.md](setup.md)) | 2026-10-18 |
