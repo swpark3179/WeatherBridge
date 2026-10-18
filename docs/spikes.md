@@ -8,11 +8,20 @@ Supabase Edge Function(서울 리전)에서 Open-Meteo와 data.go.kr에 접근�
 ```bash
 curl -s https://<project-ref>.supabase.co/functions/v1/spike-reach -H "x-spike-token: $SPIKE_TOKEN"
 ```
+Windows PowerShell에서는 `curl`이 `Invoke-WebRequest`의 별칭이라 위 형식이 동작하지 않습니다. 둘 중 하나를 쓰세요.
+```powershell
+# 1) Windows 내장 curl.exe (한글이 깨지면 먼저 chcp 65001)
+curl.exe -s "https://<project-ref>.supabase.co/functions/v1/spike-reach" -H "x-spike-token: <SPIKE_TOKEN>"
+
+# 2) PowerShell 명령 (-Depth를 빼면 안쪽 값이 생략됨)
+$r = Invoke-RestMethod -Uri "https://<project-ref>.supabase.co/functions/v1/spike-reach" -Headers @{ "x-spike-token" = "<SPIKE_TOKEN>" }
+$r | ConvertTo-Json -Depth 10
+```
 - 합격 기준: Open-Meteo 200 + 3개 모델(`ecmwf_ifs025`, `ncep_gfs_seamless`, `dwd_icon_seamless`) 강수확률 값 존재 / 기상청 `resultCode 00` + POP 항목 존재 / 각 2초 이내
 
 | 날짜 | Open-Meteo | 기상청 | 비고 |
 |---|---|---|---|
-| | | | Supabase 프로젝트 생성 대기 |
+| 2026-10-18 | ✅ 200, 1,426ms, 3개 모델 모두 48시간 값 | ⏸ 키 미등록으로 건너뜀 | 리전 `ap-northeast-2`. 같은 시각(10/18 00–05시) 모델별 값이 크게 달라 다중 소스 비교의 필요성 확인: ECMWF 4→49%, GFS 0→11%, ICON 0→8% |
 
 ## S2. 서버 → APNs 발송 (`spike-apns`) — 개발자 계정 필요
 Edge Function에서 APNs(HTTP/2)로 발송되는지와 Live Activity 브로드캐스트 흐름 전체를 확인.
@@ -33,6 +42,20 @@ curl -s $F "${H[@]}" -d '{"action":"update-sample","channelId":"<채널>"}'
 curl -s $F "${H[@]}" -d '{"action":"end-sample","channelId":"<채널>"}'
 ```
 TestFlight 빌드는 production APNs를 쓰므로 `"env":"production"`을 추가합니다.
+
+PowerShell에서는 본문을 해시테이블로 만들어 보냅니다.
+```powershell
+$F = "https://<project-ref>.supabase.co/functions/v1/spike-apns"
+$H = @{ "x-spike-token" = "<SPIKE_TOKEN>" }
+function Spike($body) {
+  Invoke-RestMethod -Method Post -Uri $F -Headers $H -ContentType "application/json" `
+    -Body ($body | ConvertTo-Json) | ConvertTo-Json -Depth 10
+}
+Spike @{ action = "create-channel" }
+Spike @{ action = "start-sample"; deviceToken = "<push-to-start 토큰>"; channelId = "<채널>"; minutes = 10 }
+Spike @{ action = "update-sample"; channelId = "<채널>" }
+Spike @{ action = "end-sample"; channelId = "<채널>" }
+```
 
 - 합격 기준
   - 1~4 모두 APNs 2xx
