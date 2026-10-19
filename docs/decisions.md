@@ -11,4 +11,7 @@
 | D7 | 실기기 배포는 **Apple Developer Program + CI 서명 + TestFlight** | Mac 없이 설치 가능한 유일한 경로. 푸시·Live Activity·WeatherKit에도 멤버십 필요 | 2026-10-17 |
 | D8 | 서버는 **Supabase 서울 리전 무료 티어**, 푸시는 **APNs 직접**(Firebase 미사용) | iOS 전용이라 FCM 불필요. Edge Function(Deno)에서 HTTP/2로 APNs 호출 | 2026-10-17 |
 | D9 | Live Activity 날짜 필드는 **epoch 초(Int)** | ActivityKit의 Date 디코딩 방식에 의존하지 않고 서버와 계약을 단순화 | 2026-10-17 |
-| D10 | Supabase 프로젝트는 **별도 계정**(서울 리전)에 두고, 배포·시크릿은 **사용자 PC의 Supabase CLI**로 수행 | 기존 계정이 무료 프로젝트 한도에 도달. 이 계정은 Claude의 Supabase 연결 밖이라 배포 절차를 문서화([setup.md](setup.md)) | 2026-10-18 |
+| D10 | Supabase 프로젝트는 **별도 계정**(서울 리전)에 둔다 | 기존 계정이 무료 프로젝트 한도에 도달. 이 계정은 Claude의 Supabase 연결 밖이라 배포 절차를 문서화([setup.md](setup.md)) | 2026-10-18 |
+| D11 | 서버 배포는 **GitHub Actions**(`server-deploy.yml`), 점검은 `server-smoke.yml`(매일 실행) | Claude가 워크플로를 실행해 배포·점검까지 할 수 있고, 매일 호출로 무료 프로젝트의 7일 무활동 일시정지도 막음 | 2026-10-18 |
+| D12 | Phase 1 함수(`refresh`·`forecast`·`briefing`)는 **운영 토큰 `SPIKE_TOKEN`**으로 보호 | 앱 사용자가 아직 없음. Phase 2 앱용 함수는 Supabase 권장 방식(사용자 JWT, `@supabase/server`)으로 전환 | 2026-10-18 |
+| D13 | 서버는 **새 API 키 체계**(`SUPABASE_SECRET_KEYS`, publishable key) 사용, legacy anon/service_role 키는 쓰지 않음 | legacy 키는 2026년 말 폐기 예정 | 2026-10-18 |

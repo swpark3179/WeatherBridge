@@ -1,0 +1,26 @@
+name: Server smoke
+
+# 배포된 서버 점검. 매일 한 번 실행해 무료 프로젝트의 7일 무활동 일시정지도 막는다.
+# 필요한 Actions secrets: SUPABASE_PROJECT_ID, SPIKE_TOKEN
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 22 * * *" # 매일 07:17 KST
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test
+        env:
+          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SPIKE_TOKEN: ${{ secrets.SPIKE_TOKEN }}
+        run: bash server/scripts/smoke.sh

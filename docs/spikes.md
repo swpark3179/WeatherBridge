@@ -2,6 +2,8 @@
 
 본 개발 전에 위험이 큰 부분을 실제로 확인합니다. 결과는 아래 표에 기록합니다.
 
+> Phase 1부터는 GitHub Actions의 **Server smoke** 워크플로가 S1 측정과 예보 함수 점검을 함께 실행합니다(매일 07:17 KST, 수동 실행 가능). 아래 명령은 PC에서 직접 확인할 때 씁니다.
+
 ## S1. 서버 → 날씨 API 접근성 (`spike-reach`)
 Supabase Edge Function(서울 리전)에서 Open-Meteo와 data.go.kr에 접근되는지, 지연은 얼마인지 확인.
 

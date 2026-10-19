@@ -1,9 +1,18 @@
-# Supabase CLI 설정 (프로젝트: weatherbridge, 서울 리전)
+# Supabase CLI 설정. project_id는 로컬 식별자일 뿐이며 실제 프로젝트는 SUPABASE_PROJECT_ID로 연결한다.
 project_id = "weatherbridge"
 
-# 스파이크 함수는 자체 헤더(x-spike-token)로 인증한다.
+# Phase 0 스파이크·Phase 1 함수는 운영 토큰 헤더(x-spike-token)로 자체 인증한다.
 [functions.spike-reach]
 verify_jwt = false
 
 [functions.spike-apns]
+verify_jwt = false
+
+[functions.refresh]
+verify_jwt = false
+
+[functions.forecast]
+verify_jwt = false
+
+[functions.briefing]
 verify_jwt = false
