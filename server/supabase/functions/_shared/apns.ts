@@ -118,7 +118,7 @@ export function createProviderToken(key: ApnsKey, nowSec: number): Promise<strin
 
 /**
  * APNs는 토큰을 20분보다 자주 갱신하면 거부하고, 60분이 지나면 만료시킨다 → 50분간 재사용.
- * (Phase 1 이후에는 콜드 스타트 대비 DB에 저장)
+ * 한 인스턴스 안에서만 재사용한다. 여러 인스턴스가 함께 쓰려면 SharedProviderToken.
  */
 export class ProviderTokenCache {
   #token: string | null = null;
@@ -132,6 +132,36 @@ export class ProviderTokenCache {
       this.#issuedAt = nowSec;
     }
     return this.#token;
+  }
+}
+
+/** 공급자 토큰 저장소 (DB). 함수 인스턴스가 바뀌어도 같은 토큰을 쓰게 한다. */
+export interface ProviderTokenStore {
+  getProviderToken(keyId: string): Promise<{ token: string; issuedAt: number } | null>;
+  putProviderToken(keyId: string, token: string, issuedAt: number): Promise<void>;
+}
+
+/** 매분 실행되는 dispatch처럼 콜드 스타트가 잦은 곳에서 쓰는 공유 공급자 토큰 */
+export class SharedProviderToken {
+  constructor(
+    private readonly store: ProviderTokenStore,
+    private readonly key: ApnsKey,
+    private readonly maxAgeSec = 50 * 60,
+  ) {}
+
+  async get(nowSec: number): Promise<string> {
+    const saved = await this.store.getProviderToken(this.key.keyId);
+    if (saved && saved.issuedAt <= nowSec && nowSec - saved.issuedAt < this.maxAgeSec) {
+      return saved.token;
+    }
+    return this.renew(nowSec);
+  }
+
+  /** 새 토큰을 만들어 저장한다. APNs가 403 ExpiredProviderToken으로 거부했을 때도 쓴다. */
+  async renew(nowSec: number): Promise<string> {
+    const token = await createProviderToken(this.key, nowSec);
+    await this.store.putProviderToken(this.key.keyId, token, nowSec);
+    return token;
   }
 }
 
@@ -155,6 +185,8 @@ export function sendToDevice(opts: {
   priority: 5 | 10;
   payload: unknown;
   expiration?: number;
+  /** 같은 값의 알림은 기기에서 하나로 합쳐진다 (64바이트 이하) */
+  collapseId?: string;
 }, fetchFn: FetchFn = fetch): Promise<ApnsResult> {
   const headers: Record<string, string> = {
     authorization: `bearer ${opts.providerToken}`,
@@ -163,6 +195,7 @@ export function sendToDevice(opts: {
     "apns-priority": String(opts.priority),
   };
   if (opts.expiration !== undefined) headers["apns-expiration"] = String(opts.expiration);
+  if (opts.collapseId) headers["apns-collapse-id"] = opts.collapseId;
   return request(
     fetchFn,
     `${APNS_HOSTS[opts.env].device}/3/device/${opts.deviceToken}`,

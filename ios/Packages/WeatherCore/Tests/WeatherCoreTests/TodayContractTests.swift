@@ -1,0 +1,61 @@
+import Foundation
+import Testing
+@testable import WeatherCore
+
+/// 서버 `today` 응답(계약 샘플)을 앱 모델로 디코딩할 수 있는지 확인한다.
+/// 같은 파일을 server/tests/today_test.ts가 서버 생성 결과와 비교한다.
+@Suite struct TodayContractTests {
+    private func loadFixture() throws -> TodayResponse {
+        let url = try #require(
+            Bundle.module.url(forResource: "today_response", withExtension: "json", subdirectory: "Fixtures")
+        )
+        return try JSONDecoder().decode(TodayResponse.self, from: Data(contentsOf: url))
+    }
+
+    @Test func decodesTodayResponse() throws {
+        let today = try loadFixture()
+        #expect(today.tz == "Asia/Seoul")
+        #expect(today.threshold == 30)
+        #expect(today.places.map(\.kind) == [.home, .office])
+        #expect(today.places.map(\.name) == ["집", "회사"])
+
+        let home = today.places[0]
+        #expect(home.highlight)
+        #expect(home.hours.count == 4)
+        #expect(home.windows.count == 1)
+        #expect(home.windows[0].end - home.windows[0].start == 2 * 3600)
+        #expect(home.sources.map(\.provider) == ["kma_short", "om_ecmwf", "om_gfs", "om_icon"])
+        #expect(home.hours[2].families["kma"] == 60)
+        #expect(home.hours[2].providers["om_ecmwf"] == 80)
+        #expect(home.hours[2].split)
+        #expect(home.hours[3].level == .high)
+
+        let office = today.places[1]
+        #expect(!office.highlight)
+        #expect(office.errors == ["om_icon: timeout"])
+        #expect(office.hours[0].families["dwd"] == nil)
+    }
+
+    @Test func briefingMatchesLiveActivityState() throws {
+        let briefing = try loadFixture().briefing
+        #expect(briefing.state.highlight)
+        #expect(briefing.state.headline.hasPrefix("☔"))
+        #expect(briefing.state.places.map(\.name) == ["집", "회사"])
+        #expect(briefing.state.places[1].rainWindow == nil)
+        #expect(briefing.firstHour == 6)
+        #expect(!briefing.summary.isEmpty)
+    }
+
+    @Test func hoursAreHourlyAndAscending() throws {
+        for place in try loadFixture().places {
+            let gaps = zip(place.hours.dropFirst(), place.hours).map { $0.t - $1.t }
+            #expect(gaps.allSatisfy { $0 == 3600 })
+        }
+    }
+
+    @Test func roundTrips() throws {
+        let today = try loadFixture()
+        let data = try JSONEncoder().encode(today)
+        #expect(try JSONDecoder().decode(TodayResponse.self, from: data) == today)
+    }
+}

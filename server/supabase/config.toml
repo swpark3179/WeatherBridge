@@ -16,3 +16,12 @@ verify_jwt = false
 
 [functions.briefing]
 verify_jwt = false
+
+# 매분 pg_cron이 운영 토큰(x-spike-token)으로 호출
+[functions.dispatch]
+verify_jwt = false
+
+# 앱 사용자 JWT는 함수 안에서 @supabase/server가 JWKS로 검증한다.
+# 플랫폼 검사는 레거시(HS256) 토큰만 이해하는 경우가 있어 끈다.
+[functions.today]
+verify_jwt = false

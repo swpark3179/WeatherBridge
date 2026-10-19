@@ -3,7 +3,7 @@
  * - 1시간 해상도 값만 시간별 종합에 쓴다(3시간 구간 확률은 제외).
  * - 같은 계열은 평균 내어 한 표로, 계열 간에는 가중 평균(국내 기상청 1.5).
  */
-import type { Family, ProviderForecast } from "./forecast_types.ts";
+import type { Family, ProviderForecast, ProviderId } from "./forecast_types.ts";
 
 /** 등급 경계는 ios/Packages/WeatherCore RainLevel과 같다. */
 export type RainLevel = "clear" | "low" | "moderate" | "high";
@@ -30,6 +30,8 @@ export interface HourAgg {
   level: RainLevel | null;
   /** 계열별 값 */
   families: Partial<Record<Family, number>>;
+  /** 소스별 값 (한 계열에 소스가 여럿이면 계열 값은 이들의 평균) */
+  providers: Partial<Record<ProviderId, number>>;
   /** 임계값 이상인 계열 수 / 참여 계열 수 */
   agreeing: number;
   total: number;
@@ -67,6 +69,7 @@ export function aggregate(
 ): Aggregate {
   const threshold = opts.threshold ?? 30;
   const popByFamily = new Map<number, Map<Family, number[]>>();
+  const popByProvider = new Map<number, Partial<Record<ProviderId, number>>>();
   const tempByFamily = new Map<number, Map<Family, number>>();
 
   for (const f of forecasts) {
@@ -76,6 +79,7 @@ export function aggregate(
         const fam = popByFamily.get(s.t) ?? new Map<Family, number[]>();
         fam.set(f.family, [...(fam.get(f.family) ?? []), s.pop]);
         popByFamily.set(s.t, fam);
+        popByProvider.set(s.t, { ...popByProvider.get(s.t), [f.provider]: s.pop });
       }
       if (s.temp !== null) {
         const temps = tempByFamily.get(s.t) ?? new Map<Family, number>();
@@ -97,6 +101,7 @@ export function aggregate(
     const set = entries.map(([f]) => f).sort().join(",");
     const temps = tempByFamily.get(t);
     const temp = TEMP_PRIORITY.map((f) => temps?.get(f)).find((v) => v !== undefined) ?? null;
+    const providers = popByProvider.get(t) ?? {};
 
     if (entries.length === 0) {
       hours.push({
@@ -106,6 +111,7 @@ export function aggregate(
         max: null,
         level: null,
         families,
+        providers,
         agreeing: 0,
         total: 0,
         split: false,
@@ -134,6 +140,7 @@ export function aggregate(
       max,
       level: rainLevel(consensus),
       families,
+      providers,
       agreeing: values.filter((v) => v >= threshold).length,
       total: entries.length,
       split: max - min >= SPLIT_SPREAD,
