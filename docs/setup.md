@@ -7,7 +7,7 @@
 | 이름 | 등록 위치 | 용도 | 상태 |
 |---|---|---|---|
 | `SUPABASE_PROJECT_ID` | Actions, Codespaces | 배포·점검 워크플로가 프로젝트를 찾을 때 | 등록됨 |
-| `SUPABASE_REGION` | Actions, Codespaces | 참고용 (`ap-northeast-2`) | 등록됨 |
+| `SUPABASE_REGION` | Actions, Codespaces | `Server smoke`가 함수를 이 리전에서 실행하도록 지정 (`ap-northeast-2`) | 등록됨 |
 | `SPIKE_TOKEN` | Actions, Codespaces, Supabase 함수 시크릿, Vault(`spike_token`) | 운영 토큰. `refresh`·`forecast`·`briefing`·스파이크 함수 호출 시 `x-spike-token` 헤더 | 등록됨 (Vault는 아래 3번에서 1회 등록) |
 | `SUPABASE_API_KEY` | Actions, Codespaces | Publishable key. Phase 2 앱 접속용 | 등록됨 |
 | `SUPABASE_ANON_KEY` | Actions, Codespaces | Legacy anon key. 예비 (신규 코드에서는 사용 안 함) | 등록됨 |
@@ -26,6 +26,7 @@
 저장소 **Settings → Secrets and variables → Actions → New repository secret**
 - `SUPABASE_ACCESS_TOKEN`: Supabase 대시보드 → 계정 메뉴 → **Access Tokens** → 새 토큰 생성. 권한을 고르는 화면이 나오면 이 프로젝트의 Edge Functions 배포, 시크릿, 데이터베이스 마이그레이션이 가능하도록 선택합니다.
 - `SUPABASE_DB_PASSWORD`: 프로젝트를 만들 때 정한 DB 비밀번호. 잊었다면 Project Settings → Database에서 재설정합니다(Edge Functions는 DB 비밀번호를 쓰지 않아 영향 없음).
+  - 재설정한 비밀번호는 커넥션 풀러에 몇 분 뒤 반영됩니다. 그 전에 배포하면 `Apply migrations`가 `password authentication failed (28P01)`로 실패하니, 3~5분 뒤 다시 실행합니다.
 - (선택) `KMA_SERVICE_KEY`: 아래 "기상청 API 키"의 Decoding 키.
 
 ### 2. 배포

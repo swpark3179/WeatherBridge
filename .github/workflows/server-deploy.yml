@@ -38,6 +38,13 @@ jobs:
             echo "::error::Actions secrets가 없습니다:$missing (docs/setup.md 참고)"
             exit 1
           fi
+          # 붙여넣기로 섞인 앞뒤 공백·줄바꿈은 DB 인증 실패(28P01)로만 보여서 미리 잡는다. 값은 출력하지 않는다.
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD PROJECT_ID; do
+            if [[ "${!v}" =~ ^[[:space:]] || "${!v}" =~ [[:space:]]$ ]]; then
+              echo "::error::$v 값 앞뒤에 공백이나 줄바꿈이 있습니다. Actions secret을 다시 붙여넣어 주세요"
+              exit 1
+            fi
+          done
       - uses: supabase/setup-cli@v3
         with:
           version: latest
