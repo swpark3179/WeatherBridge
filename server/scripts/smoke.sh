@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # 배포된 Edge Functions 점검. 좌표·토큰은 출력하지 않는다.
-#   PROJECT_ID=<ref> SPIKE_TOKEN=<token> bash server/scripts/smoke.sh
+#   PROJECT_ID=<ref> SPIKE_TOKEN=<token> [SUPABASE_REGION=ap-northeast-2] bash server/scripts/smoke.sh
+# SUPABASE_REGION을 주면 그 리전에서 함수를 실행한다(x-region). 없으면 호출한 곳에서 가까운 리전.
 # SMOKE_BASE_URL을 주면 그 주소로 호출한다(로컬 확인용).
 set -uo pipefail
 
 : "${SPIKE_TOKEN:?SPIKE_TOKEN이 필요합니다}"
 BASE="${SMOKE_BASE_URL:-https://${PROJECT_ID:?SUPABASE_PROJECT_ID가 필요합니다}.supabase.co/functions/v1}"
 FAILED=0
+REGION_HEADER=()
+[ -n "${SUPABASE_REGION:-}" ] && REGION_HEADER=(-H "x-region: ${SUPABASE_REGION}")
 
 # call METHOD PATH → BODY, STATUS
 call() {
   local out
-  out=$(curl -sS -X "$1" -H "x-spike-token: ${SPIKE_TOKEN}" -w $'\n%{http_code}' "${BASE}/$2")
+  out=$(curl -sS -X "$1" -H "x-spike-token: ${SPIKE_TOKEN}" ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} \
+    -w $'\n%{http_code}' "${BASE}/$2")
   BODY=$(printf '%s' "$out" | sed '$d')
   STATUS=$(printf '%s' "$out" | tail -n1)
 }

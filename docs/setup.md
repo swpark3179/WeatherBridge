@@ -7,7 +7,7 @@
 | 이름 | 등록 위치 | 용도 | 상태 |
 |---|---|---|---|
 | `SUPABASE_PROJECT_ID` | Actions, Codespaces | 배포·점검 워크플로가 프로젝트를 찾을 때 | 등록됨 |
-| `SUPABASE_REGION` | Actions, Codespaces | 참고용 (`ap-northeast-2`) | 등록됨 |
+| `SUPABASE_REGION` | Actions, Codespaces | `Server smoke`가 함수를 이 리전에서 실행하도록 지정 (`ap-northeast-2`) | 등록됨 |
 | `SPIKE_TOKEN` | Actions, Codespaces, Supabase 함수 시크릿, Vault(`spike_token`) | 운영 토큰. `refresh`·`forecast`·`briefing`·스파이크 함수 호출 시 `x-spike-token` 헤더 | 등록됨 (Vault는 아래 3번에서 1회 등록) |
 | `SUPABASE_API_KEY` | Actions, Codespaces | Publishable key. Phase 2 앱 접속용 | 등록됨 |
 | `SUPABASE_ANON_KEY` | Actions, Codespaces | Legacy anon key. 예비 (신규 코드에서는 사용 안 함) | 등록됨 |
