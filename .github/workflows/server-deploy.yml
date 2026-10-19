@@ -70,7 +70,9 @@ jobs:
             args+=("APNS_KEY_ID=$(printf '%s' "$APNS_KEY_ID" | tr -d '[:space:]')")
             args+=("APNS_P8=$(printf '%s' "$APNS_P8" | tr -d '\r\n')")
           else
-            echo "::notice::APPLE_TEAM_ID·APNS_KEY_ID·APNS_P8 중 빠진 값이 있어 APNs 시크릿은 건너뜁니다"
+            missing=""
+            for v in APPLE_TEAM_ID APNS_KEY_ID APNS_P8; do [ -n "${!v}" ] || missing="$missing $v"; done
+            echo "::notice::Actions secrets에 없는 값이 있어 APNs 시크릿은 건너뜁니다:$missing"
           fi
           if [ ${#args[@]} -gt 0 ]; then
             supabase secrets set --project-ref "$PROJECT_ID" "${args[@]}"
