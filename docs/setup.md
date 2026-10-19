@@ -9,13 +9,16 @@
 | `SUPABASE_PROJECT_ID` | Actions, Codespaces | 배포·점검 워크플로가 프로젝트를 찾을 때 | 등록됨 |
 | `SUPABASE_REGION` | Actions, Codespaces | `Server smoke`가 함수를 이 리전에서 실행하도록 지정 (`ap-northeast-2`) | 등록됨 |
 | `SPIKE_TOKEN` | Actions, Codespaces, Supabase 함수 시크릿, Vault(`spike_token`) | 운영 토큰. `refresh`·`forecast`·`briefing`·스파이크 함수 호출 시 `x-spike-token` 헤더 | 등록됨 (Vault는 아래 3번에서 1회 등록) |
-| `SUPABASE_API_KEY` | Actions, Codespaces | Publishable key. Phase 2 앱 접속용 | 등록됨 |
+| `SUPABASE_API_KEY` | Actions, Codespaces | Publishable key. `iOS TestFlight`가 앱에 넣는다 (`sb_publishable_…`만 허용) | 등록됨 |
 | `SUPABASE_ANON_KEY` | Actions, Codespaces | Legacy anon key. 예비 (신규 코드에서는 사용 안 함) | 등록됨 |
-| `SUPABASE_ACCESS_TOKEN` | Actions | 배포 워크플로의 Supabase CLI 인증 | **추가 필요** |
-| `SUPABASE_DB_PASSWORD` | Actions | 배포 워크플로의 마이그레이션 적용 | **추가 필요** |
-| `KMA_SERVICE_KEY` | Actions (배포 때 함수 시크릿으로 자동 동기화) | 기상청 API | 선택 (키 발급 후) |
-| `project_url` | Vault | cron이 `refresh`를 호출할 주소 | 아래 3번에서 1회 등록 |
-| `APNS_*` | Supabase 함수 시크릿 | APNs 발송 | Apple Developer 가입 후 |
+| `SUPABASE_ACCESS_TOKEN` | Actions | 배포 워크플로의 Supabase CLI 인증 | 등록됨 |
+| `SUPABASE_DB_PASSWORD` | Actions | 배포 워크플로의 마이그레이션 적용 | 등록됨 |
+| `KMA_SERVICE_KEY` | Actions (배포 때 함수 시크릿으로 자동 동기화) | 기상청 API | 등록됨 |
+| `project_url` | Vault | cron이 `refresh`를 호출할 주소 | 등록됨 |
+| `APPLE_TEAM_ID` | Actions (배포 때 함수 시크릿 `APNS_TEAM_ID`로 동기화) | 팀 ID(10자리). 앱 서명·APNs | 등록됨 |
+| `APNS_KEY_ID`, `APNS_P8` | Actions (배포 때 함수 시크릿으로 동기화) | APNs 인증 키 ID와 .p8 내용 | 등록됨 |
+| `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` | Actions | App Store Connect API 키. 프로파일 조회·TestFlight 업로드 | 등록됨 |
+| `IOS_DIST_P12_B64`, `IOS_DIST_P12_PASSWORD` | Actions | Apple Distribution 인증서(.p12, base64)와 비밀번호 | **추가 필요** (아래 "TestFlight 배포") |
 
 - Supabase 함수 시크릿 이름은 `SUPABASE_`로 시작할 수 없습니다(예약어).
 - `SPIKE_TOKEN`을 바꿀 때는 Actions·Codespaces·Vault를 모두 같은 값으로 바꾸고 배포 워크플로를 다시 실행합니다. 함수 시크릿은 배포 때 Actions 값으로 덮어씁니다.
@@ -79,28 +82,67 @@ select * from public.obs_log order by obs_time desc limit 5;
 4. Actions secret `KMA_SERVICE_KEY`로 등록 → 다음 배포 때 함수 시크릿으로 반영
 5. 승인 직후에는 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`가 날 수 있습니다(반영까지 1~2시간).
 
-## Apple Developer 가입 후 (실기기 검증·배포)
+## TestFlight 배포 (Phase 2, 1회 준비)
 
-### Apple Developer Program (연 US$99)
-- 푸시 알림, Live Activity 원격 시작, WeatherKit, TestFlight 배포에 모두 필요합니다.
-- Mac이 없으므로 서명·업로드는 GitHub Actions에서 합니다(Phase 2에서 파이프라인 구성).
+Mac이 없으므로 서명·업로드는 `iOS TestFlight` 워크플로가 합니다. 배포 인증서와 App Store 프로파일로 **수동 서명**합니다.
+- 자동 서명은 쓰지 않습니다. 기기 등록이 필요하고, 실행할 때마다 인증서가 새로 생기며, Admin 키가 필요하기 때문입니다.
+- 아래 순서대로 하세요. 프로파일은 App ID의 기능이 모두 정해진 뒤 마지막에 만듭니다. 나중에 기능을 바꾸면 프로파일을 다시 만들어야 합니다.
 
-### App ID
-- Certificates, Identifiers & Profiles → Identifiers
-  - `io.github.swpark3179.weatherbridge` — Capabilities: **Push Notifications**
-  - `io.github.swpark3179.weatherbridge.CommuteWidget`
-- `ios/project.yml`의 `DEVELOPMENT_TEAM`에 팀 ID 입력.
+### 1. App ID 기능 확인
+[Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list) → Identifiers
+- `io.github.swpark3179.weatherbridge`
+  - **Push Notifications** 체크 → Configure(또는 Edit)에서 **Broadcast Capability**도 켭니다(Live Activity 채널 갱신에 필요).
+  - Save
+- `io.github.swpark3179.weatherbridge.CommuteWidget`: 추가 기능 없음
+- Keys에서 APNs 키를 열어 환경이 **Sandbox & Production**인지 확인합니다. TestFlight 앱은 Production APNs를 씁니다.
+
+### 2. 배포 인증서 (.p12)
+Windows에서는 Git for Windows에 들어 있는 **Git Bash**를 엽니다. 맨 앞의 `MSYS_NO_PATHCONV=1`은 Git Bash가 `/CN=…`을 파일 경로로 바꾸지 않게 합니다.
+```bash
+mkdir -p ~/wb-cert && cd ~/wb-cert
+openssl genrsa -out dist.key 2048
+MSYS_NO_PATHCONV=1 openssl req -new -key dist.key -out dist.csr -subj "/CN=WeatherBridge Distribution/C=KR"
+```
+1. Certificates → **+** → **Apple Distribution** → Continue → `dist.csr` 업로드 → 내려받은 `distribution.cer`을 `~/wb-cert`에 둡니다.
+2. 인증서와 키를 .p12로 묶습니다. 비밀번호를 물어보면 새로 정해 입력합니다(이 값이 `IOS_DIST_P12_PASSWORD`).
+   ```bash
+   openssl x509 -inform DER -in distribution.cer -out dist.pem
+   openssl pkcs12 -export -legacy -inkey dist.key -in dist.pem -out dist.p12
+   ```
+   - `-legacy` 오류가 나면 이것으로 바꿉니다: `openssl pkcs12 -export -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -inkey dist.key -in dist.pem -out dist.p12`
+   - 최신 OpenSSL 기본 암호화로 만든 .p12는 macOS 키체인이 읽지 못해서, 예전 방식으로 묶습니다.
+3. base64로 바꿔 클립보드에 복사합니다.
+   ```bash
+   base64 -w0 dist.p12 | clip
+   ```
+4. GitHub → Settings → Secrets and variables → Actions에 등록합니다.
+   - `IOS_DIST_P12_B64`: 복사한 내용
+   - `IOS_DIST_P12_PASSWORD`: 2번에서 정한 비밀번호
+5. `~/wb-cert` 폴더(특히 `dist.key`)는 안전한 곳에 백업하거나 지웁니다. 인증서를 다시 만들 때는 같은 절차를 반복하면 됩니다.
+
+### 3. App Store 프로파일 2개
+Profiles → **+** → Distribution의 **App Store Connect** → Continue
+| App ID | 인증서 | 프로파일 이름(정확히) |
+|---|---|---|
+| `io.github.swpark3179.weatherbridge` | 2번에서 만든 Apple Distribution | `WeatherBridge AppStore` |
+| `io.github.swpark3179.weatherbridge.CommuteWidget` | 같은 인증서 | `WeatherBridge Widget AppStore` |
+- 워크플로가 App Store Connect API로 이 이름의 프로파일을 찾아 설치하므로, 내려받을 필요는 없습니다.
+- 이름이 다르면 `ios/project.yml`과 `.github/workflows/ios-testflight.yml`도 같이 바꿔야 합니다.
+
+### 4. App Store Connect
+- API 키(`ASC_*`)의 역할은 **App Manager 이상**이어야 합니다(프로파일 조회·업로드).
+- 앱 → **TestFlight** → 내부 테스트 → 그룹을 만들고 본인 계정을 추가합니다.
+- iPhone에 **TestFlight** 앱을 설치하고 같은 Apple 계정으로 로그인합니다.
+
+### 5. 실행
+- Actions → **iOS TestFlight** → Run workflow. 빌드 번호는 `실행 번호.시도 번호`로 자동으로 정해집니다.
+- 업로드 후 App Store Connect 처리(수 분~30분)가 끝나면 TestFlight 앱에 나타납니다.
+- 암호화 수출 규정 질문은 `ITSAppUsesNonExemptEncryption=false`로 건너뜁니다.
 
 ### APNs 인증 키 (.p8)
-- Keys → 새 키 → **Apple Push Notifications service (APNs)** 체크 → 다운로드(한 번만 가능)
-- Supabase 함수 시크릿 등록
-  - `APNS_TEAM_ID`: 팀 ID (10자리)
-  - `APNS_KEY_ID`: 키 ID (10자리)
-  - `APNS_P8`: .p8 파일 내용 전체(`-----BEGIN PRIVATE KEY-----` 포함)
-  - `APNS_BUNDLE_ID`: 기본값 `io.github.swpark3179.weatherbridge` (생략 가능)
-
-### App Store Connect API 키 (CI 업로드용, Phase 2)
-- App Store Connect → 사용자 및 액세스 → 통합 → API 키 생성 → GitHub 저장소 Secrets에 등록.
+- 함수 시크릿 `APNS_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`은 `Server deploy`가 Actions의 `APPLE_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`로 자동 등록합니다.
+- .p8은 줄바꿈을 뺀 한 줄로 등록되며, 함수가 그대로 읽습니다.
+- `APNS_BUNDLE_ID`는 기본값 `io.github.swpark3179.weatherbridge`를 씁니다.
 
 ## 이후 단계에서 필요한 것
 | 단계 | 항목 |
