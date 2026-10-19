@@ -26,6 +26,7 @@
 저장소 **Settings → Secrets and variables → Actions → New repository secret**
 - `SUPABASE_ACCESS_TOKEN`: Supabase 대시보드 → 계정 메뉴 → **Access Tokens** → 새 토큰 생성. 권한을 고르는 화면이 나오면 이 프로젝트의 Edge Functions 배포, 시크릿, 데이터베이스 마이그레이션이 가능하도록 선택합니다.
 - `SUPABASE_DB_PASSWORD`: 프로젝트를 만들 때 정한 DB 비밀번호. 잊었다면 Project Settings → Database에서 재설정합니다(Edge Functions는 DB 비밀번호를 쓰지 않아 영향 없음).
+  - 재설정한 비밀번호는 커넥션 풀러에 몇 분 뒤 반영됩니다. 그 전에 배포하면 `Apply migrations`가 `password authentication failed (28P01)`로 실패하니, 3~5분 뒤 다시 실행합니다.
 - (선택) `KMA_SERVICE_KEY`: 아래 "기상청 API 키"의 Decoding 키.
 
 ### 2. 배포
