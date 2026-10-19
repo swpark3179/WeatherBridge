@@ -15,7 +15,7 @@
 | `SUPABASE_DB_PASSWORD` | Actions | 배포 워크플로의 마이그레이션 적용 | 등록됨 |
 | `KMA_SERVICE_KEY` | Actions (배포 때 함수 시크릿으로 자동 동기화) | 기상청 API | 등록됨 |
 | `project_url` | Vault | cron이 `refresh`를 호출할 주소 | 등록됨 |
-| `APPLE_TEAM_ID` | Actions (배포 때 함수 시크릿 `APNS_TEAM_ID`로 동기화) | 팀 ID(10자리). 앱 서명·APNs | 등록됨 |
+| `APPLE_TEAM_ID` (또는 `APNS_TEAM_ID`) | Actions (배포 때 함수 시크릿 `APNS_TEAM_ID`로 동기화) | 팀 ID(10자리). 앱 서명·APNs. 워크플로는 두 이름 중 있는 것을 쓴다 | 등록됨 (`APNS_TEAM_ID`) |
 | `APNS_KEY_ID`, `APNS_P8` | Actions (배포 때 함수 시크릿으로 동기화) | APNs 인증 키 ID와 .p8 내용 | 등록됨 |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` | Actions | App Store Connect API 키. 프로파일 조회·TestFlight 업로드 | 등록됨 |
 | `IOS_DIST_P12_B64`, `IOS_DIST_P12_PASSWORD` | Actions | Apple Distribution 인증서(.p12, base64)와 비밀번호 | **추가 필요** (아래 "TestFlight 배포") |
@@ -140,7 +140,7 @@ Profiles → **+** → Distribution의 **App Store Connect** → Continue
 - 암호화 수출 규정 질문은 `ITSAppUsesNonExemptEncryption=false`로 건너뜁니다.
 
 ### APNs 인증 키 (.p8)
-- 함수 시크릿 `APNS_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`은 `Server deploy`가 Actions의 `APPLE_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`로 자동 등록합니다.
+- 함수 시크릿 `APNS_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`은 `Server deploy`가 Actions의 `APPLE_TEAM_ID`(없으면 `APNS_TEAM_ID`)·`APNS_KEY_ID`·`APNS_P8`로 자동 등록합니다.
 - .p8은 줄바꿈을 뺀 한 줄로 등록되며, 함수가 그대로 읽습니다.
 - `APNS_BUNDLE_ID`는 기본값 `io.github.swpark3179.weatherbridge`를 씁니다.
 
