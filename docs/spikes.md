@@ -2,7 +2,7 @@
 
 본 개발 전에 위험이 큰 부분을 실제로 확인합니다. 결과는 아래 표에 기록합니다.
 
-> Phase 1부터는 GitHub Actions의 **Server smoke** 워크플로가 S1 측정과 예보 함수 점검을 함께 실행합니다(매일 07:17 KST, 수동 실행 가능). 아래 명령은 PC에서 직접 확인할 때 씁니다.
+> Phase 1부터는 GitHub Actions의 **Server smoke** 워크플로가 S1 측정과 예보 함수 점검을 함께 실행합니다(매일 07:17 KST, 수동 실행 가능). 함수는 `x-region` 헤더로 서울 리전에서 실행합니다. 아래 명령은 PC에서 직접 확인할 때 씁니다.
 
 ## S1. 서버 → 날씨 API 접근성 (`spike-reach`)
 Supabase Edge Function(서울 리전)에서 Open-Meteo와 data.go.kr에 접근되는지, 지연은 얼마인지 확인.
@@ -24,6 +24,7 @@ $r | ConvertTo-Json -Depth 10
 | 날짜 | Open-Meteo | 기상청 | 비고 |
 |---|---|---|---|
 | 2026-10-18 | ✅ 200, 1,426ms, 3개 모델 모두 48시간 값 | ⏸ 키 미등록으로 건너뜀 | 리전 `ap-northeast-2`. 같은 시각(10/18 00–05시) 모델별 값이 크게 달라 다중 소스 비교의 필요성 확인: ECMWF 4→49%, GFS 0→11%, ICON 0→8% |
+| 2026-10-20 | ✅ 200, 1,288ms, 3개 모델 모두 48시간 값 | ✅ 200, 1,241ms, `resultCode 00`, 항목 980개·POP 81개(10/19 23시 발표) | `Server smoke`에서 서울 리전으로 고정해 측정. 리전을 지정하지 않으면 GitHub 러너(미국) 근처인 `us-west-2`에서 실행되고 기상청 2,535ms·Open-Meteo 914ms |
 
 ## S2. 서버 → APNs 발송 (`spike-apns`) — 개발자 계정 필요
 Edge Function에서 APNs(HTTP/2)로 발송되는지와 Live Activity 브로드캐스트 흐름 전체를 확인.
