@@ -117,7 +117,8 @@ WeatherBridge/
 4. 실기기 검증(개발자 계정 필요): push-to-start + `input-push-channel` → 채널 업데이트 → `end` + `stale-date`로 T에 확실히 사라지는지.
 5. 절차·결과 기록: [spikes.md](spikes.md), 계정·키: [setup.md](setup.md).
 
-### Phase 1 — 서버 예보 엔진 (기상청 + Open-Meteo) ← 진행 중
+### Phase 1 — 서버 예보 엔진 (기상청 + Open-Meteo) ← 완료(2026-10-20)
+- 실서버 확인: 집·회사 모두 4개 계열 종합, 매시 20분 cron 수집, 예보·실황 기록 적재([spikes.md](spikes.md) "Phase 1 실서버 점검").
 - 배포는 GitHub Actions(`server-deploy`), 점검은 `server-smoke`. 함수는 운영 토큰(`SPIKE_TOKEN`)으로 보호하고 Phase 2에서 사용자 인증으로 전환([decisions.md](decisions.md) D11–D13).
 - 집·회사는 사용자가 SQL로 등록([setup.md](setup.md) "Phase 1 서버 준비").
 1. `kma_grid.ts`(위경도→nx/ny Lambert 변환), base_time 계산(Phase 0의 `kma_time.ts` 확장).
