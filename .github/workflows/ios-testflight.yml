@@ -2,7 +2,7 @@ name: iOS TestFlight
 
 # 배포 인증서로 수동 서명해 App Store Connect(TestFlight)에 올린다. 준비 절차는 docs/setup.md "TestFlight 배포".
 # 필요한 Actions secrets:
-#   APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (App Store Connect API 키, App Manager 이상)
+#   APPLE_TEAM_ID(또는 APNS_TEAM_ID), ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (App Store Connect API 키, App Manager 이상)
 #   IOS_DIST_P12_B64, IOS_DIST_P12_PASSWORD (Apple Distribution 인증서)
 #   SUPABASE_PROJECT_ID, SUPABASE_API_KEY (publishable key, 앱에 들어간다)
 on:
@@ -29,7 +29,7 @@ jobs:
       run:
         working-directory: ios
     env:
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APNS_TEAM_ID }}
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}

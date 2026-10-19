@@ -2,7 +2,7 @@ name: Server deploy
 
 # 마이그레이션 적용 + 함수 시크릿 동기화 + Edge Functions 배포.
 # 필요한 Actions secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID, SPIKE_TOKEN
-# (선택) KMA_SERVICE_KEY, APPLE_TEAM_ID·APNS_KEY_ID·APNS_P8 — 있으면 함수 시크릿으로 함께 등록한다.
+# (선택) KMA_SERVICE_KEY, APPLE_TEAM_ID(또는 APNS_TEAM_ID)·APNS_KEY_ID·APNS_P8 — 있으면 함수 시크릿으로 함께 등록한다.
 # 자세한 내용은 docs/setup.md
 on:
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
         env:
           SPIKE_TOKEN: ${{ secrets.SPIKE_TOKEN }}
           KMA_SERVICE_KEY: ${{ secrets.KMA_SERVICE_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APNS_TEAM_ID }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_P8: ${{ secrets.APNS_P8 }}
         run: |
