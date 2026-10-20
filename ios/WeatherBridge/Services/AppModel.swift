@@ -1,6 +1,10 @@
 import Foundation
 import WeatherCore
 
+enum AppTab: Hashable {
+    case today, compare, settings
+}
+
 /// 앱 전체 상태: 로그인(익명), 집·회사, 설정, 오늘 예보, 기기 등록.
 @MainActor
 final class AppModel: ObservableObject {
@@ -25,6 +29,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     /// 잠깐 보여줄 안내 (저장 실패 등)
     @Published var notice: String?
+    /// 오늘 화면에서 비교 탭으로 바로 갈 때 바꾼다
+    @Published var selectedTab: AppTab = .today
+    /// 비교 탭에서 보여줄 장소
+    @Published var comparePlace: PlaceKind = .home
 
     let apnsEnvironment: ApnsEnvironment
     let appVersion: String
@@ -53,6 +61,22 @@ final class AppModel: ObservableObject {
 
     var home: PlaceSummary? { places.first { $0.kind == .home } }
     var office: PlaceSummary? { places.first { $0.kind == .office } }
+
+    /// 지금 시간부터 `hours`시간 안의 출근 시각 (장소 시간대 기준). 공휴일은 아직 빼지 않는다.
+    func commuteTimes(tz: String, now: Int, hours: Int = 24) -> [Int] {
+        LocalClock(tz: tz).occurrences(
+            of: settings.commuteTime,
+            days: settings.commuteDays,
+            from: now - now % 3600,
+            to: now + hours * 3600
+        )
+    }
+
+    /// 비교 탭의 그 장소로 바로 간다
+    func openCompare(_ kind: PlaceKind) {
+        comparePlace = kind
+        selectedTab = .compare
+    }
 
     // MARK: 시작
 

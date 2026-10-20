@@ -29,14 +29,104 @@ import Testing
         #expect(seoul.windowText(start: t + 14 * 3600, end: t + 16 * 3600, now: t) == "오늘 22–24시")
     }
 
-    @Test func bannerDescribesTheNextRainWindow() throws {
+    @Test func spanAndRangeTexts() {
+        let seoul = LocalClock(tz: "Asia/Seoul")
+        let t = 1_792_450_800 // 2026-10-20(화) 08:00 KST
+        #expect(seoul.spanText(start: t, end: t + 2 * 3600) == "8–10시")
+        #expect(seoul.compactWindowText(start: t, end: t + 2 * 3600, now: t) == "8–10시")
+        #expect(seoul.compactWindowText(start: t + 16 * 3600, end: t + 18 * 3600, now: t) == "내일 0–2시")
+        #expect(seoul.rangeText(start: t, end: t + 2 * 3600) == "08:00 – 10:00")
+        #expect(seoul.rangeText(start: t + 14 * 3600, end: t + 16 * 3600) == "22:00 – 24:00")
+        #expect(seoul.rangeText(start: t + 1800, end: t + 3600) == "08:30 – 09:00")
+        #expect(seoul.timeText(t + 1800) == "08:30")
+        #expect(seoul.dayLabel(t + 40 * 3600, from: t) == "모레")
+    }
+
+    @Test func commuteOccurrencesFollowWeekdays() {
+        let seoul = LocalClock(tz: "Asia/Seoul")
+        let t = 1_792_450_800 // 화요일 08:00
+        let commute = ClockTime(hour: 8, minute: 30)
+        let weekdays = [1, 2, 3, 4, 5]
+        #expect(seoul.occurrences(of: commute, days: weekdays, from: t, to: t + 48 * 3600) == [t + 1800, t + 1800 + 86400])
+        #expect(seoul.occurrences(of: commute, days: [3], from: t, to: t + 48 * 3600) == [t + 1800 + 86400])
+        #expect(seoul.occurrences(of: commute, days: [1], from: t, to: t + 48 * 3600).isEmpty)
+        // 이미 지난 오늘 출근 시각은 빼고 [from, to)만 본다
+        #expect(seoul.occurrences(of: commute, days: weekdays, from: t + 3600, to: t + 24 * 3600).isEmpty)
+    }
+
+    @Test func upcomingWindowsPeakAndClearing() throws {
+        let today = try fixture()
+        var home = today.places[0]
+        let now = today.generatedAt
+        let morning = home.windows[0]
+        #expect(home.upcomingWindows(now: now) == [morning])
+        #expect(home.upcomingWindows(now: morning.end).isEmpty)
+        #expect(morning.hourCount == 2)
+        #expect(morning.contains(morning.start) && !morning.contains(morning.end))
+        #expect(home.peakHour(of: morning)?.t == morning.start + 3600)
+        #expect(home.clearingText(after: morning, now: now, tz: today.tz) == "10시부터 그쳐요 · 이후 비 소식 없음")
+
+        let evening = RainWindow(start: morning.start + 10 * 3600, end: morning.start + 13 * 3600, maxPop: 43, agreeing: 3, total: 4)
+        let night = RainWindow(start: morning.start + 19 * 3600, end: morning.start + 21 * 3600, maxPop: 35, agreeing: 2, total: 4)
+        home.windows = [night, morning, evening]
+        #expect(home.upcomingWindows(now: now) == [morning, evening, night])
+        #expect(home.upcomingWindows(within: 12, now: now) == [morning, evening])
+        #expect(home.clearingText(after: morning, now: now, tz: today.tz) == "10시부터 그쳐요 · 18시에 다시 와요")
+        #expect(home.clearingText(after: evening, now: now, tz: today.tz) == "21시부터 그쳐요 · 내일 3시에 다시 와요")
+    }
+
+    @Test func splitSpansAndTemperatureRange() throws {
         let today = try fixture()
         let home = today.places[0]
-        #expect(home.bannerText(now: today.generatedAt, tz: today.tz) == "☔ 오늘 8–10시 최대 68% · 4개 중 4개")
-        let office = today.places[1]
-        #expect(office.bannerText(now: today.generatedAt, tz: today.tz) == "앞으로 24시간 비 소식 없음 (최대 9%)")
-        // 지난 비 구간은 무시한다
-        #expect(home.nextWindow(now: home.windows[0].end) == nil)
+        let now = today.generatedAt
+        #expect(home.splitSpans(now: now) == [TimeSpan(start: home.hours[2].t, end: home.hours[3].t + 3600)])
+        #expect(today.places[1].splitSpans(now: now).isEmpty)
+        let range = try #require(home.temperatureRange(now: now))
+        #expect(range.low == 15 && range.high == 17)
+    }
+
+    @Test func overviewListsEveryRainWindow() throws {
+        var today = try fixture()
+        let now = today.generatedAt
+        let rainy = today.overview(now: now)
+        #expect(rainy.headline == "집 8–10시 비")
+        #expect(rainy.detail == "회사 비 소식 없음 (최대 9%)")
+        #expect(rainy.isRainy)
+
+        let morning = today.places[0].windows[0]
+        today.places[0].windows.append(RainWindow(start: morning.start + 10 * 3600, end: morning.start + 13 * 3600, maxPop: 43, agreeing: 3, total: 4))
+        today.places[0].windows.append(RainWindow(start: morning.start + 19 * 3600, end: morning.start + 21 * 3600, maxPop: 35, agreeing: 2, total: 4))
+        #expect(today.overview(now: now).headline == "집 8–10시, 18–21시, 내일 3–5시 비")
+
+        today.places[0].windows = []
+        let dry = today.overview(now: now)
+        #expect(dry.headline == "앞으로 24시간 비 소식 없음")
+        #expect(dry.detail == "집 최대 68% · 회사 최대 9%")
+        #expect(!dry.isRainy)
+    }
+
+    @Test func timelinePlacesBracketsTicksAndMarkers() throws {
+        let today = try fixture()
+        let home = today.places[0]
+        let commute = home.windows[0].start + 1800 // 08:30
+        let model = RainTimelineModel(place: home, tz: today.tz, now: today.generatedAt, commuteTimes: [commute, commute + 86400])
+        #expect(model.bars.map(\.pop) == [4, 16, 51, 68])
+        #expect(model.bars.map(\.level) == [.clear, .clear, .moderate, .high])
+        #expect(model.brackets == [.init(window: 0, start: 2, end: 4, label: "8–10시")])
+        #expect(model.ticks == [.init(position: 0, label: "6시", isDayStart: false), .init(position: 3, label: "9시", isDayStart: false)])
+        #expect(abs(model.now - 10.0 / 60) < 0.0001)
+        #expect(model.midnight == nil)
+        #expect(model.commutes == [2.5])
+
+        // 22시부터 4시간으로 바꾸면 2번째 칸에서 날짜가 바뀐다
+        var late = home
+        let start = home.hours[0].t + 16 * 3600
+        for i in late.hours.indices { late.hours[i].t = start + i * 3600 }
+        late.windows = []
+        let night = RainTimelineModel(place: late, tz: today.tz, now: start)
+        #expect(night.midnight == 2)
+        #expect(night.ticks == [.init(position: 2, label: "내일", isDayStart: true)])
+        #expect(night.brackets.isEmpty)
     }
 
     @Test func upcomingStartsAtTheCurrentHour() throws {
