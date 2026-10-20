@@ -156,17 +156,28 @@ jobs:
       - name: Upload to TestFlight
         run: |
           set -o pipefail
-          plutil -create xml1 "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert method -string app-store-connect "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert destination -string upload "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert teamID -string "$APPLE_TEAM_ID" "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert signingStyle -string manual "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert signingCertificate -string "Apple Distribution" "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert manageAppVersionAndBuildNumber -bool NO "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert uploadSymbols -bool YES "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert provisioningProfiles -dictionary "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert "provisioningProfiles.$APP_BUNDLE_ID" -string "$APP_PROFILE" "$RUNNER_TEMP/ExportOptions.plist"
-          plutil -insert "provisioningProfiles.$WIDGET_BUNDLE_ID" -string "$WIDGET_PROFILE" "$RUNNER_TEMP/ExportOptions.plist"
+          # 번들 ID의 '.'을 plutil이 키 경로 구분자로 읽어서 provisioningProfiles는 plutil -insert로 넣을 수 없다
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$APP_BUNDLE_ID</key><string>$APP_PROFILE</string>
+              <key>$WIDGET_BUNDLE_ID</key><string>$WIDGET_PROFILE</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$RUNNER_TEMP/ExportOptions.plist" > /dev/null
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/WeatherBridge.xcarchive" \
