@@ -32,6 +32,7 @@ final class AppModel: ObservableObject {
     private var apnsToken: String?
     private var pushToStartToken: String?
     private var registered: (apns: String, pushToStart: String?)?
+    private var registrationFailed = false
 
     init(bundle: Bundle = .main) {
         let info = bundle.infoDictionary ?? [:]
@@ -150,6 +151,14 @@ final class AppModel: ObservableObject {
 
     // MARK: 기기 등록
 
+    /// 앱이 다시 앞으로 나올 때. 등록에 실패했었다면 다음 실행까지 기다리지 않고 다시 시도한다.
+    func didBecomeActive() async {
+        await registerDeviceIfNeeded()
+        if phase == .ready {
+            await refreshToday()
+        }
+    }
+
     func updateTokens(apns: String?, pushToStart: String?) {
         apnsToken = apns
         pushToStartToken = pushToStart
@@ -169,9 +178,13 @@ final class AppModel: ObservableObject {
                 appVersion: appVersion
             )
             registered = (apnsToken, pushToStartToken)
+            registrationFailed = false
         } catch {
-            // 다음 실행이나 토큰 변경 때 다시 시도한다
-            notice = "알림 기기 등록에 실패했습니다: \(Self.describe(error))"
+            // 앱이 다시 앞으로 나올 때, 다음 실행, 토큰 변경 때 다시 시도한다. 안내는 처음 실패했을 때만 띄운다.
+            if !registrationFailed {
+                notice = "알림 기기 등록에 실패했습니다: \(Self.describe(error))"
+            }
+            registrationFailed = true
         }
     }
 

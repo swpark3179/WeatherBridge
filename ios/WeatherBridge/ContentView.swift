@@ -13,8 +13,8 @@ struct ContentView: View {
                 model.updateTokens(apns: apns, pushToStart: pushToStart)
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active, model.phase == .ready {
-                    Task { await model.refreshToday() }
+                if phase == .active {
+                    Task { await model.didBecomeActive() }
                 }
             }
             .alert("알림", isPresented: noticeBinding) {
