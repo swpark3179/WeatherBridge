@@ -54,6 +54,7 @@ targets:
         NSSupportsLiveActivities: true
         UIBackgroundModes: [remote-notification]
         ITSAppUsesNonExemptEncryption: false
+        NSLocationWhenInUseUsageDescription: 현재 위치를 집이나 회사로 등록할 때만 씁니다. 좌표는 약 1km 단위로 반올림해 저장합니다.
         WBSupabaseProjectRef: $(WB_SUPABASE_PROJECT_REF)
         WBSupabasePublishableKey: $(WB_SUPABASE_PUBLISHABLE_KEY)
         WBApnsEnv: $(WB_APNS_ENV)
