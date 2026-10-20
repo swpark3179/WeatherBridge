@@ -48,6 +48,9 @@ targets:
       path: WeatherBridge/Info.plist
       properties:
         CFBundleDisplayName: WeatherBridge
+        # XcodeGen은 버전을 1.0/1로 고정해 넣으므로 빌드 설정을 따르게 한다 (위젯도 앱과 같아야 한다)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -86,6 +89,8 @@ targets:
       path: CommuteWidget/Info.plist
       properties:
         CFBundleDisplayName: WeatherBridge
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

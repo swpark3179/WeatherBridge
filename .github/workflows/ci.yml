@@ -66,9 +66,18 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
-      - name: Check Release signing settings
-        # XcodeGen 타깃 기본값이 project.yml 값을 덮어쓰면 TestFlight archive에서야 드러나서 여기서 미리 본다
+      - name: Check Release settings
+        # XcodeGen 기본값이 project.yml 값을 덮어쓰면 TestFlight 실행에서야 드러나서 여기서 미리 본다
         run: |
+          for plist in WeatherBridge/Info.plist CommuteWidget/Info.plist; do
+            version="$(plutil -extract CFBundleShortVersionString raw -o - "$plist")"
+            build="$(plutil -extract CFBundleVersion raw -o - "$plist")"
+            echo "$plist: CFBundleShortVersionString=$version, CFBundleVersion=$build"
+            if [ "$version" != '$(MARKETING_VERSION)' ] || [ "$build" != '$(CURRENT_PROJECT_VERSION)' ]; then
+              echo "::error::$plist 버전이 빌드 설정(MARKETING_VERSION, CURRENT_PROJECT_VERSION)을 따르지 않습니다"
+              exit 1
+            fi
+          done
           for target in WeatherBridge CommuteWidget; do
             settings="$(xcodebuild -project WeatherBridge.xcodeproj -target "$target" -configuration Release -showBuildSettings)"
             identity="$(sed -nE 's/^ *CODE_SIGN_IDENTITY = (.*)$/\1/p' <<<"$settings")"
