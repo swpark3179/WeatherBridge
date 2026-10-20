@@ -142,10 +142,14 @@ jobs:
           aps="$(plutil -extract aps-environment raw -o - "$RUNNER_TEMP/app.entitlements")"
           app_build="$(plutil -extract CFBundleVersion raw -o - "$APP/Info.plist")"
           widget_build="$(plutil -extract CFBundleVersion raw -o - "$WIDGET/Info.plist")"
-          echo "aps-environment=$aps, build app=$app_build widget=$widget_build"
+          app_version="$(plutil -extract CFBundleShortVersionString raw -o - "$APP/Info.plist")"
+          widget_version="$(plutil -extract CFBundleShortVersionString raw -o - "$WIDGET/Info.plist")"
+          echo "aps-environment=$aps, version app=$app_version widget=$widget_version, build app=$app_build widget=$widget_build"
           [ "$aps" = production ] || { echo "::error::aps-environment가 production이 아닙니다: $aps"; exit 1; }
           [ "$app_build" = "$BUILD_NUMBER" ] && [ "$widget_build" = "$BUILD_NUMBER" ] \
-            || { echo "::error::앱과 위젯의 빌드 번호가 다릅니다"; exit 1; }
+            || { echo "::error::빌드 번호가 $BUILD_NUMBER가 아닙니다 (앱 $app_build, 위젯 $widget_build)"; exit 1; }
+          [ "$app_version" = "$widget_version" ] \
+            || { echo "::error::앱과 위젯의 버전이 다릅니다 (앱 $app_version, 위젯 $widget_version)"; exit 1; }
           ref="$(plutil -extract WBSupabaseProjectRef raw -o - "$APP/Info.plist")"
           [ -n "$ref" ] || { echo "::error::앱에 Supabase 프로젝트 ref가 들어가지 않았습니다"; exit 1; }
 
