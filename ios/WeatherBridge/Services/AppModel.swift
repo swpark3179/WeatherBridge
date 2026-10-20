@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     /// 서버에 설정이 한 번이라도 저장돼 있으면 true
     @Published private(set) var hasSavedSettings = false
     @Published private(set) var today: TodayResponse?
+    /// 화면의 today가 저장해 둔 응답(네트워크로 새로 받지 못함)이면 true
+    @Published private(set) var todayIsCached = false
     @Published private(set) var todayError: String?
     @Published private(set) var isRefreshing = false
     /// 잠깐 보여줄 안내 (저장 실패 등)
@@ -59,6 +61,10 @@ final class AppModel: ObservableObject {
             return
         }
         phase = .loading
+        if today == nil, let cached = TodayCache.load() {
+            today = cached
+            todayIsCached = true
+        }
         do {
             async let loadedPlaces = api.places()
             async let loadedSettings = api.settings()
@@ -76,7 +82,13 @@ final class AppModel: ObservableObject {
                 await refreshToday()
             }
         } catch {
-            phase = .failed(Self.describe(error))
+            if today != nil {
+                // 오프라인 등: 저장해 둔 예보를 보여주고 다음 새로고침 때 다시 시도한다
+                phase = .ready
+                todayError = Self.describe(error)
+            } else {
+                phase = .failed(Self.describe(error))
+            }
         }
     }
 
@@ -124,8 +136,11 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            today = try await api.today()
+            let fresh = try await api.today()
+            today = fresh
+            todayIsCached = false
             todayError = nil
+            TodayCache.save(fresh)
         } catch SupabaseError.noPlaces {
             phase = .onboarding
         } catch {
@@ -168,6 +183,7 @@ final class AppModel: ObservableObject {
             try await api.deleteAccount()
             places = []
             today = nil
+            TodayCache.clear()
             registered = nil
             settings = UserSettings(tz: TimeZone.current.identifier)
             hasSavedSettings = false

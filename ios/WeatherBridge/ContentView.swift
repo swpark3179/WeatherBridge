@@ -55,6 +55,9 @@ struct ContentView: View {
                 Tab("오늘", systemImage: "cloud.sun") {
                     TodayView()
                 }
+                Tab("비교", systemImage: "square.grid.3x3.fill") {
+                    CompareView()
+                }
                 Tab("설정", systemImage: "gearshape") {
                     SettingsView()
                 }
