@@ -1,0 +1,45 @@
+name: Device check
+
+# TestFlight로 설치한 기기 점검 (docs/spikes.md "Phase 2 실기기 확인", S2).
+#   status        기기 등록, 요약 알림 설정, 최근 발송 기록(예정 시각 대비 지연)
+#   test-alert    가장 최근에 앱을 연 기기로 테스트 알림
+#   live-activity 잠금화면 브리핑 원격 시작 → 업데이트 → 종료 (기기 토큰은 서버가 DB에서 꺼내 쓴다)
+# 필요한 Actions secrets: SUPABASE_PROJECT_ID, SPIKE_TOKEN, (선택) SUPABASE_REGION
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "점검 종류"
+        type: choice
+        options: [status, test-alert, live-activity]
+        default: status
+      minutes:
+        description: "live-activity: 시작·업데이트 뒤 이 시간(분)이 지나면 '출근 시간 지남'으로 바뀜"
+        default: "10"
+      end:
+        description: "live-activity: 업데이트 1분 뒤 종료까지 보내기 (끄면 stale 표시 확인)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: device-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Device check
+        env:
+          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SPIKE_TOKEN: ${{ secrets.SPIKE_TOKEN }}
+          SUPABASE_REGION: ${{ secrets.SUPABASE_REGION }}
+          CHECK: ${{ inputs.check }}
+          LA_MINUTES: ${{ inputs.minutes }}
+          LA_END: ${{ inputs.end && '1' || '0' }}
+        run: bash server/scripts/device_check.sh "$CHECK"

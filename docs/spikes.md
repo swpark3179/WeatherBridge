@@ -48,12 +48,39 @@ $r | ConvertTo-Json -Depth 10
 |---|---|---|---|---|
 | 2026-10-20 17:00 | ✅ 대상 0, 오류 0 | ✅ 토큰 없이 401 | ✅ 가입 → 서울시청 등록 → 4개 소스 48시간 → "오늘은 비 소식이 없어요 / 점검 비 소식 없음(최대 16%)" → 삭제 | PR #7 배포 직후. 익명 로그인·비대칭 JWT 검증이 실서버에서 동작함을 확인. 같은 시각 운영 장소(집·회사)는 17–24시 최대 80%로, 기상청 값도 서울시청 격자 20%·집 격자 60%라 위치 차이로 판단 |
 
+## Phase 2 실기기 확인 (`Device check`)
+TestFlight로 설치한 앱으로 Phase 2 완료 기준(지정 시각 ±1분 안에 요약 알림 수신)을 확인합니다.
+Actions → **Device check** → Run workflow에서 점검 종류를 고릅니다. 결과에 토큰·좌표는 나오지 않고, ID는 앞 8자리만 나옵니다.
+
+1. TestFlight에서 앱을 설치하고 온보딩을 마칩니다(집 → 회사 → 알림 허용·요약 시각).
+2. `status`로 다음을 확인합니다.
+   - 기기가 `production`·활성으로 등록됐는지, push-to-start 토큰이 있는지
+   - 집·회사와 요약 알림 설정이 저장됐는지
+3. `test-alert`로 "APNs 테스트 알림"이 오는지 봅니다. 이 알림이 오지 않으면 요약 알림도 오지 않으므로 먼저 원인을 찾습니다.
+4. 앱 설정에서 요약 시각을 **지금부터 3분 뒤**로 바꾸고 휴대폰을 잠급니다. 알림이 도착한 시각을 적어 둡니다.
+5. `status`의 "최근 요약 알림"에서 그날 기록이 `sent`이고, APNs 접수가 예정 시각 +60초 안인지 확인합니다.
+
+- 합격 기준
+  - 예정 시각 ±1분 안에 알림 도착
+  - 발송 기록 `sent`, 같은 날 두 번 오지 않음
+- 요약 알림은 현지 날짜마다 한 번만 보냅니다. 같은 날 시각을 다시 바꿔도 또 오지 않으니, 다시 확인하려면 다음 날 합니다.
+- 서버는 매분 발송 대상을 고릅니다. 예정 시각 직후 실행에서 보내고, 실패하면 15분 안에서 다시 시도합니다. APNs는 휴대폰이 꺼져 있으면 1시간까지 보관했다가 전달합니다.
+
+| 날짜(KST) | 빌드 | 기기 등록 | 테스트 알림 | 요약 알림(예정 → 도착) | 서버 기록 | 비고 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
 ## S2. 서버 → APNs 발송 (`spike-apns`) — 개발자 계정 필요
 Edge Function에서 APNs(HTTP/2)로 발송되는지와 Live Activity 브로드캐스트 흐름 전체를 확인.
 
-준비: [setup.md](setup.md) "TestFlight 배포" → `Server deploy` 실행(APNs 시크릿 동기화) → TestFlight로 앱 설치 → 실험실 탭에서 **push-to-start 토큰** 복사.
+준비: [setup.md](setup.md) "TestFlight 배포" → TestFlight로 앱 설치 → 앱을 한 번 열어 기기 등록(`Device check` `status`에서 push-to-start 토큰 "있음" 확인).
 
-TestFlight 앱은 production APNs를 쓰므로 모든 요청에 `"env":"production"`을 넣습니다.
+**간편 실행**: 앱을 완전히 종료(앱 전환기에서 위로 밀기)하고 휴대폰을 잠근 뒤, Actions → **Device check** → `live-activity`를 실행합니다.
+- 채널 생성 → 원격 시작 → 1분 뒤 업데이트 → 1분 뒤 종료를 차례로 보냅니다.
+- 기기 토큰은 서버가 DB에서 가장 최근에 등록된 기기의 것을 꺼내 쓰므로 복사할 필요가 없습니다.
+- stale 확인은 `end`를 끄고 `minutes`를 2로 실행합니다. 업데이트 2분 뒤 "출근 시간 지남"으로 바뀌어야 합니다.
+
+직접 호출할 때도 `deviceToken`을 빼면 같은 방식으로 등록된 기기를 씁니다. TestFlight 앱은 production APNs를 쓰므로 모든 요청에 `"env":"production"`을 넣습니다.
 
 ```bash
 F=https://<project-ref>.supabase.co/functions/v1/spike-apns
@@ -61,8 +88,8 @@ H=(-H "x-spike-token: $SPIKE_TOKEN" -H "content-type: application/json")
 
 # 1) 채널 생성 → 응답의 channelId 기록
 curl -s $F "${H[@]}" -d '{"action":"create-channel","env":"production"}'
-# 2) 원격 시작 (앱이 꺼진 상태에서도 잠금화면에 떠야 함)
-curl -s $F "${H[@]}" -d '{"action":"start-sample","env":"production","deviceToken":"<push-to-start 토큰>","channelId":"<채널>","minutes":10}'
+# 2) 원격 시작 (앱이 꺼진 상태에서도 잠금화면에 떠야 함). deviceToken을 빼면 등록된 최근 기기
+curl -s $F "${H[@]}" -d '{"action":"start-sample","env":"production","channelId":"<채널>","minutes":10}'
 # 3) 채널로 업데이트 → 헤드라인이 "업데이트된 샘플"로 바뀌는지
 curl -s $F "${H[@]}" -d '{"action":"update-sample","env":"production","channelId":"<채널>"}'
 # 4) 종료 → 즉시 사라지는지
@@ -78,7 +105,7 @@ function Spike($body) {
     -Body ($body | ConvertTo-Json) | ConvertTo-Json -Depth 10
 }
 Spike @{ action = "create-channel"; env = "production" }
-Spike @{ action = "start-sample"; env = "production"; deviceToken = "<push-to-start 토큰>"; channelId = "<채널>"; minutes = 10 }
+Spike @{ action = "start-sample"; env = "production"; channelId = "<채널>"; minutes = 10 }
 Spike @{ action = "update-sample"; env = "production"; channelId = "<채널>" }
 Spike @{ action = "end-sample"; env = "production"; channelId = "<채널>" }
 ```

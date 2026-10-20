@@ -55,6 +55,26 @@ export interface Device {
   apnsEnv: ApnsEnvName;
 }
 
+/** 점검용 기기 정보. 토큰 값은 담지 않는다. */
+export interface DeviceStatus {
+  id: string;
+  userId: string;
+  apnsEnv: ApnsEnvName;
+  hasPushToStart: boolean;
+  appVersion: string | null;
+  active: boolean;
+  deactivatedReason: string | null;
+  /** 마지막으로 앱이 기기를 등록한 시각 (epoch 초) */
+  lastSeenAt: number;
+}
+
+/** 실험실 발송용 토큰 */
+export interface LatestDevice {
+  id: string;
+  apnsToken: string;
+  pushToStartToken: string | null;
+}
+
 export type DispatchKind = "summary";
 export type DispatchStatus = "pending" | "sent" | "retry" | "failed" | "skipped";
 
@@ -65,6 +85,14 @@ export interface DispatchKey {
   localDate: string;
   /** 예정 시각 (epoch 초) */
   scheduledAt: number;
+}
+
+export interface DispatchRecord extends DispatchKey {
+  status: DispatchStatus;
+  attempts: number;
+  detail: unknown;
+  /** 마지막으로 바뀐 시각 (epoch 초). 끝난 기록이면 발송을 마친 시각이다. */
+  updatedAt: number;
 }
 
 export interface DispatchClaim {
@@ -91,6 +119,12 @@ export interface Repo {
   finishDispatch(id: number, status: DispatchStatus, detail: unknown): Promise<void>;
   listActiveDevices(userId: string): Promise<Device[]>;
   deactivateDevice(id: string, reason: string): Promise<void>;
+  /** 점검용: 최근에 등록된 기기부터 */
+  listRecentDevices(limit: number): Promise<DeviceStatus[]>;
+  /** 실험실 발송용: 그 환경에서 가장 최근에 등록된 활성 기기 */
+  latestDevice(env: ApnsEnvName): Promise<LatestDevice | null>;
+  /** 점검용: 예정 시각이 늦은 기록부터 */
+  listRecentDispatches(limit: number): Promise<DispatchRecord[]>;
   getProviderToken(keyId: string): Promise<{ token: string; issuedAt: number } | null>;
   putProviderToken(keyId: string, token: string, issuedAt: number): Promise<void>;
   setPlaceGrid(id: string, nx: number, ny: number): Promise<void>;
@@ -245,6 +279,49 @@ export function supabaseRepo(client?: SupabaseClient): Repo {
         await db.from("devices").update({ active: false, deactivated_reason: reason }).eq("id", id),
       );
     },
+    async listRecentDevices(limit) {
+      const rows = check(
+        await db.from("devices").select(
+          "id, user_id, apns_env, push_to_start_token, app_version, active, deactivated_reason, last_seen_at",
+        ).order("last_seen_at", { ascending: false }).limit(limit),
+      ) ?? [];
+      return rows.map((r) => ({
+        id: r.id,
+        userId: r.user_id,
+        apnsEnv: r.apns_env,
+        hasPushToStart: Boolean(r.push_to_start_token),
+        appVersion: r.app_version,
+        active: r.active,
+        deactivatedReason: r.deactivated_reason,
+        lastSeenAt: sec(r.last_seen_at),
+      }));
+    },
+    async latestDevice(env) {
+      const row = check(
+        await db.from("devices").select("id, apns_token, push_to_start_token").eq("apns_env", env)
+          .eq("active", true).order("last_seen_at", { ascending: false }).limit(1).maybeSingle(),
+      );
+      return row
+        ? { id: row.id, apnsToken: row.apns_token, pushToStartToken: row.push_to_start_token }
+        : null;
+    },
+    async listRecentDispatches(limit) {
+      const rows = check(
+        await db.from("dispatch_log").select(
+          "user_id, kind, local_date, scheduled_at, status, attempts, detail, updated_at",
+        ).order("scheduled_at", { ascending: false }).limit(limit),
+      ) ?? [];
+      return rows.map((r) => ({
+        userId: r.user_id,
+        kind: r.kind,
+        localDate: r.local_date,
+        scheduledAt: sec(r.scheduled_at),
+        status: r.status,
+        attempts: r.attempts,
+        detail: r.detail,
+        updatedAt: sec(r.updated_at),
+      }));
+    },
     async getProviderToken(keyId) {
       const row = check(
         await db.from("apns_provider_token").select("token, issued_at").eq("key_id", keyId)
@@ -316,13 +393,18 @@ export function supabaseRepo(client?: SupabaseClient): Repo {
   };
 }
 
-interface MemoryDispatch extends DispatchKey {
+interface MemoryDispatch extends DispatchRecord {
   id: number;
-  status: DispatchStatus;
-  attempts: number;
-  detail: unknown;
-  updatedAt: number;
 }
+
+/** 테스트에서 넣는 기기. 점검용 값은 생략할 수 있다. */
+type MemoryDevice = Device & {
+  active: boolean;
+  reason: string | null;
+  pushToStartToken?: string | null;
+  appVersion?: string | null;
+  lastSeenAt?: number;
+};
 
 /** 테스트용 메모리 저장소 */
 export class MemoryRepo implements Repo {
@@ -331,7 +413,7 @@ export class MemoryRepo implements Repo {
   logs: ForecastLogRow[] = [];
   observations = new Map<string, Observation>();
   settings: UserSettings[] = [];
-  devices: Array<Device & { active: boolean; reason: string | null }> = [];
+  devices: MemoryDevice[] = [];
   dispatches: MemoryDispatch[] = [];
   providerTokens = new Map<string, { token: string; issuedAt: number }>();
   /** updatedAt 기록용 시계 (epoch 초) */
@@ -399,6 +481,35 @@ export class MemoryRepo implements Repo {
     const d = this.devices.find((d) => d.id === id);
     if (d) Object.assign(d, { active: false, reason });
     return Promise.resolve();
+  }
+  listRecentDevices(limit: number) {
+    return Promise.resolve(
+      this.devicesByLastSeen().slice(0, limit).map((d) => ({
+        id: d.id,
+        userId: d.userId,
+        apnsEnv: d.apnsEnv,
+        hasPushToStart: Boolean(d.pushToStartToken),
+        appVersion: d.appVersion ?? null,
+        active: d.active,
+        deactivatedReason: d.reason,
+        lastSeenAt: d.lastSeenAt ?? 0,
+      })),
+    );
+  }
+  latestDevice(env: ApnsEnvName) {
+    const d = this.devicesByLastSeen().find((d) => d.apnsEnv === env && d.active);
+    return Promise.resolve(
+      d ? { id: d.id, apnsToken: d.apnsToken, pushToStartToken: d.pushToStartToken ?? null } : null,
+    );
+  }
+  listRecentDispatches(limit: number) {
+    return Promise.resolve(
+      [...this.dispatches].sort((a, b) => b.scheduledAt - a.scheduledAt).slice(0, limit)
+        .map(({ id: _id, ...rest }) => structuredClone(rest)),
+    );
+  }
+  private devicesByLastSeen() {
+    return [...this.devices].sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
   }
   getProviderToken(keyId: string) {
     return Promise.resolve(this.providerTokens.get(keyId) ?? null);
