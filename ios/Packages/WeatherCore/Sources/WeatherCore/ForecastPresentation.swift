@@ -281,6 +281,92 @@ public struct RainTimelineModel: Sendable, Equatable {
     }
 }
 
+/// 비교 화면 그래프: 종합·예보별 선, 예보 범위 띠, 비 구간, 의견이 갈리는 시간과 그 설명
+public struct CompareChartModel: Sendable, Equatable {
+    public struct Disagreement: Sendable, Equatable {
+        public let span: TimeSpan
+        /// 종합에서 평균적으로 가장 멀리 떨어진 예보
+        public let provider: String
+        /// 종합보다 높게 봤으면 true
+        public let isHigh: Bool
+        /// 그 예보가 구간 안에서 가장 높게(낮게) 본 값
+        public let value: Int
+        /// 구간 안 예보끼리 최대 차이 (최고 − 최저)
+        public let spread: Int
+        /// "내일 13–16시 · 차이 50%p"
+        public let when: String
+        /// "가장 높게 본 예보 GFS(미국) 70%"
+        public let detail: String
+    }
+
+    public struct Tick: Sendable, Equatable {
+        public let t: Int
+        /// "9시". 날짜가 바뀌는 0시는 "내일"
+        public let label: String
+        public let isDayStart: Bool
+    }
+
+    public let hours: [TodayHour]
+    /// 기상청 먼저, 나머지는 이름순 (`HeatmapModel`과 같다)
+    public let providers: [String]
+    public let windows: [RainWindow]
+    public let splits: [TimeSpan]
+    public let disagreements: [Disagreement]
+    /// 24시간 이하면 3시간, 더 길면 6시간 간격
+    public let ticks: [Tick]
+
+    public init(place: TodayPlace, tz: String, now: Int, hours: Int = 24) {
+        let clock = LocalClock(tz: tz)
+        let slice = place.upcoming(hours: hours, now: now)
+        self.hours = slice
+        providers = ForecastSourceInfo.sorted(place.sources.map(\.provider) + slice.flatMap { $0.providers.keys })
+        windows = place.upcomingWindows(within: hours, now: now)
+        splits = place.splitSpans(within: hours, now: now)
+
+        let step = hours <= 24 ? 3 : 6
+        ticks = slice.enumerated().compactMap { index, hour in
+            let h = clock.hour(hour.t)
+            guard h % step == 0 else { return nil }
+            let dayStart = h == 0 && index > 0
+            return Tick(t: hour.t, label: dayStart ? clock.dayLabel(hour.t, from: now) : "\(h)시", isDayStart: dayStart)
+        }
+
+        let providers = self.providers
+        disagreements = splits.compactMap { span in
+            let inSpan = slice.filter { span.start <= $0.t && $0.t < span.end }
+            var best: (provider: String, deviation: Double)?
+            for provider in providers {
+                let deviations = inSpan.compactMap { hour -> Double? in
+                    guard let value = hour.providers[provider], let consensus = hour.consensus else { return nil }
+                    return Double(value - consensus)
+                }
+                guard !deviations.isEmpty else { continue }
+                let mean = deviations.reduce(0, +) / Double(deviations.count)
+                if best == nil || abs(mean) > abs(best?.deviation ?? 0) {
+                    best = (provider, mean)
+                }
+            }
+            guard let best else { return nil }
+            let isHigh = best.deviation > 0
+            let values = inSpan.compactMap { $0.providers[best.provider] }
+            let value = (isHigh ? values.max() : values.min()) ?? 0
+            let spread = inSpan.compactMap { hour -> Int? in
+                guard let low = hour.min, let high = hour.max else { return nil }
+                return high - low
+            }.max() ?? 0
+            return Disagreement(
+                span: span,
+                provider: best.provider,
+                isHigh: isHigh,
+                value: value,
+                spread: spread,
+                when: "\(clock.compactWindowText(start: span.start, end: span.end, now: now)) · 차이 \(spread)%p",
+                detail: "\(isHigh ? "가장 높게" : "가장 낮게") 본 예보 \(ForecastSourceInfo.label(best.provider)) \(value)%"
+            )
+        }
+    }
+}
+
 /// 비교 화면 히트맵: 행 = 종합 + 소스, 열 = 시간
 public struct HeatmapModel: Sendable, Equatable {
     public struct Row: Sendable, Equatable, Identifiable {

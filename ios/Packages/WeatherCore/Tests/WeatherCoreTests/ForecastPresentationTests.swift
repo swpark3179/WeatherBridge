@@ -136,6 +136,55 @@ import Testing
         #expect(home.upcoming(hours: 10, now: home.hours[2].t + 59).count == 2)
     }
 
+    @Test func compareChartExplainsWhoDisagrees() throws {
+        let today = try fixture()
+        let home = today.places[0]
+        let model = CompareChartModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(model.hours.map(\.t) == home.hours.map(\.t))
+        #expect(model.providers == ["kma_short", "om_ecmwf", "om_gfs", "om_icon"])
+        #expect(model.windows == home.windows)
+        #expect(model.splits == [TimeSpan(start: home.hours[2].t, end: home.hours[3].t + 3600)])
+        let d = try #require(model.disagreements.first)
+        #expect(model.disagreements.count == 1)
+        #expect(d.provider == "om_ecmwf" && d.isHigh && d.value == 90 && d.spread == 60)
+        #expect(d.when == "8–10시 · 차이 60%p")
+        #expect(d.detail == "가장 높게 본 예보 ECMWF(유럽) 90%")
+        #expect(model.ticks == [
+            .init(t: home.hours[0].t, label: "6시", isDayStart: false),
+            .init(t: home.hours[3].t, label: "9시", isDayStart: false),
+        ])
+    }
+
+    @Test func compareChartNamesALowOutlier() throws {
+        let today = try fixture()
+        var home = today.places[0]
+        // ECMWF를 종합 가까이 내리면 ICON이 가장 멀리(낮게) 떨어진다
+        home.hours[2].providers["om_ecmwf"] = 60
+        home.hours[3].providers["om_ecmwf"] = 70
+        let d = try #require(CompareChartModel(place: home, tz: today.tz, now: today.generatedAt).disagreements.first)
+        #expect(d.provider == "om_icon" && !d.isHigh && d.value == 20)
+        #expect(d.detail == "가장 낮게 본 예보 ICON(독일) 20%")
+    }
+
+    @Test func compareChartSkipsMissingSourcesAndQuietHours() throws {
+        let today = try fixture()
+        let office = CompareChartModel(place: today.places[1], tz: today.tz, now: today.generatedAt)
+        #expect(office.providers == ["kma_short", "om_ecmwf", "om_gfs"])
+        #expect(office.windows.isEmpty && office.splits.isEmpty && office.disagreements.isEmpty)
+    }
+
+    @Test func compareChartTicksWidenForTwoDays() throws {
+        let today = try fixture()
+        var place = today.places[0]
+        // 22시부터 4시간으로 바꿔 자정을 넘기게 한다
+        let start = place.hours[0].t + 16 * 3600
+        for i in place.hours.indices { place.hours[i].t = start + i * 3600 }
+        let twoDays = CompareChartModel(place: place, tz: today.tz, now: start, hours: 48)
+        #expect(twoDays.ticks == [.init(t: start + 2 * 3600, label: "내일", isDayStart: true)])
+        let oneDay = CompareChartModel(place: today.places[0], tz: today.tz, now: today.generatedAt, hours: 48)
+        #expect(oneDay.ticks.map(\.label) == ["6시"])
+    }
+
     @Test func heatmapHasAConsensusRowThenSources() throws {
         let today = try fixture()
         let model = HeatmapModel(place: today.places[0], tz: today.tz, now: today.generatedAt)
