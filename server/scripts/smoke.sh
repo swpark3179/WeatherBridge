@@ -3,7 +3,7 @@
 #   PROJECT_ID=<ref> SPIKE_TOKEN=<token> [SUPABASE_REGION=ap-northeast-2] [SUPABASE_API_KEY=sb_publishable_…] \
 #     bash server/scripts/smoke.sh
 # SUPABASE_REGION을 주면 그 리전에서 함수를 실행한다(x-region). 없으면 호출한 곳에서 가까운 리전.
-# SUPABASE_API_KEY(publishable)를 주면 익명 사용자를 만들어 앱 경로(set_place → today)를 점검하고 지운다.
+# SUPABASE_API_KEY(publishable)를 주면 익명 사용자를 만들어 앱 경로(set_place → register_device → today)를 점검하고 지운다.
 # SMOKE_BASE_URL을 주면 그 주소로 호출한다(로컬 확인용).
 set -uo pipefail
 
@@ -129,6 +129,20 @@ else
     # 공개 좌표(서울시청)
     app POST "${ROOT}/rest/v1/rpc/set_place" '{"p_kind":"home","p_name":"점검","p_lat":37.5665,"p_lon":126.978}'
     [ "$STATUS" = 200 ] || fail "set_place HTTP $STATUS: $BODY"
+
+    # 앱이 실행할 때마다 부르는 기기 등록. 가짜 토큰(sandbox)이라 발송 대상이 아니고, 계정 삭제 때 함께 지워진다.
+    app POST "${ROOT}/rest/v1/rpc/register_device" \
+      "{\"p_token\":\"$(openssl rand -hex 32)\",\"p_env\":\"sandbox\",\"p_app_version\":\"smoke\"}"
+    if [[ "$STATUS" == 20[04] ]]; then
+      app GET "${ROOT}/rest/v1/devices?select=apns_env,active,app_version"
+      if [ "$STATUS" = 200 ] && [ "$(echo "$BODY" | jq '[.[] | select(.active and .apns_env == "sandbox")] | length')" = 1 ]; then
+        echo "기기 등록 → 본인 기기 1대 확인"
+      else
+        fail "register_device 뒤 기기 조회 HTTP $STATUS: $BODY"
+      fi
+    else
+      fail "register_device HTTP $STATUS: $BODY"
+    fi
 
     app GET "${BASE}/today"
     if [ "$STATUS" != 200 ]; then
