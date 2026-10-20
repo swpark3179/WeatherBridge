@@ -66,6 +66,19 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      - name: Check Release signing settings
+        # XcodeGen 타깃 기본값이 project.yml 값을 덮어쓰면 TestFlight archive에서야 드러나서 여기서 미리 본다
+        run: |
+          for target in WeatherBridge CommuteWidget; do
+            settings="$(xcodebuild -project WeatherBridge.xcodeproj -target "$target" -configuration Release -showBuildSettings)"
+            identity="$(sed -nE 's/^ *CODE_SIGN_IDENTITY = (.*)$/\1/p' <<<"$settings")"
+            family="$(sed -nE 's/^ *TARGETED_DEVICE_FAMILY = (.*)$/\1/p' <<<"$settings")"
+            echo "$target: CODE_SIGN_IDENTITY=$identity, TARGETED_DEVICE_FAMILY=$family"
+            if [ "$identity" != "Apple Distribution" ] || [ "$family" != "1" ]; then
+              echo "::error::$target Release 설정이 project.yml과 다릅니다 (Apple Distribution, 아이폰 전용이어야 함)"
+              exit 1
+            fi
+          done
       - name: Build
         run: |
           set -o pipefail
