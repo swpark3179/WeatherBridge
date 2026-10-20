@@ -28,4 +28,4 @@ cd ios && xcodegen generate && open WeatherBridge.xcodeproj
 ```
 Mac이 없으면 GitHub Actions(`.github/workflows/ci.yml`)가 위 과정을 모두 실행합니다.
 서버 배포·점검은 `Server deploy` / `Server smoke` 워크플로가 합니다([docs/setup.md](docs/setup.md)).
-iPhone 설치는 `iOS TestFlight` 워크플로가 서명·업로드합니다([docs/setup.md](docs/setup.md) "TestFlight 배포").
+iPhone 설치는 `iOS TestFlight` 워크플로가 서명·업로드하고, 설치한 기기는 `Device check` 워크플로로 점검합니다([docs/setup.md](docs/setup.md) "TestFlight 배포").

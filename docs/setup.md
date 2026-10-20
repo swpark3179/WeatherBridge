@@ -7,8 +7,8 @@
 | 이름 | 등록 위치 | 용도 | 상태 |
 |---|---|---|---|
 | `SUPABASE_PROJECT_ID` | Actions, Codespaces | 배포·점검 워크플로가 프로젝트를 찾을 때 | 등록됨 |
-| `SUPABASE_REGION` | Actions, Codespaces | `Server smoke`가 함수를 이 리전에서 실행하도록 지정 (`ap-northeast-2`) | 등록됨 |
-| `SPIKE_TOKEN` | Actions, Codespaces, Supabase 함수 시크릿, Vault(`spike_token`) | 운영 토큰. `refresh`·`forecast`·`briefing`·스파이크 함수 호출 시 `x-spike-token` 헤더 | 등록됨 (Vault는 아래 3번에서 1회 등록) |
+| `SUPABASE_REGION` | Actions, Codespaces | `Server smoke`·`Device check`가 함수를 이 리전에서 실행하도록 지정 (`ap-northeast-2`) | 등록됨 |
+| `SPIKE_TOKEN` | Actions, Codespaces, Supabase 함수 시크릿, Vault(`spike_token`) | 운영 토큰. `refresh`·`forecast`·`briefing`·`dispatch`·`ops-status`·스파이크 함수 호출 시 `x-spike-token` 헤더 | 등록됨 (Vault는 아래 3번에서 1회 등록) |
 | `SUPABASE_API_KEY` | Actions, Codespaces | Publishable key. `iOS TestFlight`가 앱에 넣는다 (`sb_publishable_…`만 허용) | 등록됨 |
 | `SUPABASE_ANON_KEY` | Actions, Codespaces | Legacy anon key. 예비 (신규 코드에서는 사용 안 함) | 등록됨 |
 | `SUPABASE_ACCESS_TOKEN` | Actions | 배포 워크플로의 Supabase CLI 인증 | 등록됨 |
@@ -18,7 +18,7 @@
 | `APPLE_TEAM_ID` (또는 `APNS_TEAM_ID`) | Actions (배포 때 함수 시크릿 `APNS_TEAM_ID`로 동기화) | 팀 ID(10자리). 앱 서명·APNs. 워크플로는 두 이름 중 있는 것을 쓴다 | 등록됨 (`APNS_TEAM_ID`) |
 | `APNS_KEY_ID`, `APNS_P8` | Actions (배포 때 함수 시크릿으로 동기화) | APNs 인증 키 ID와 .p8 내용 | 등록됨 |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` | Actions | App Store Connect API 키. 프로파일 조회·TestFlight 업로드 | 등록됨 |
-| `IOS_DIST_P12_B64`, `IOS_DIST_P12_PASSWORD` | Actions | Apple Distribution 인증서(.p12, base64)와 비밀번호 | **추가 필요** (아래 "TestFlight 배포") |
+| `IOS_DIST_P12_B64`, `IOS_DIST_P12_PASSWORD` | Actions | Apple Distribution 인증서(.p12, base64)와 비밀번호 | 등록됨 (아래 "TestFlight 배포") |
 
 - Supabase 함수 시크릿 이름은 `SUPABASE_`로 시작할 수 없습니다(예약어).
 - `SPIKE_TOKEN`을 바꿀 때는 Actions·Codespaces·Vault를 모두 같은 값으로 바꾸고 배포 워크플로를 다시 실행합니다. 함수 시크릿은 배포 때 Actions 값으로 덮어씁니다.
@@ -157,6 +157,10 @@ Profiles → **+** → Distribution의 **App Store Connect** → Continue
 - Actions → **iOS TestFlight** → Run workflow. 빌드 번호는 `실행 번호.시도 번호`로 자동으로 정해집니다.
 - 업로드 후 App Store Connect 처리(수 분~30분)가 끝나면 TestFlight 앱에 나타납니다.
 - 암호화 수출 규정 질문은 `ITSAppUsesNonExemptEncryption=false`로 건너뜁니다.
+
+### 6. 설치 후 확인
+- Actions → **Device check**로 기기 등록·테스트 알림·요약 알림 발송 기록·잠금화면 원격 시작을 확인합니다.
+- 절차와 기록표는 [spikes.md](spikes.md) "Phase 2 실기기 확인"과 S2·S3에 있습니다.
 
 ### APNs 인증 키 (.p8)
 - 함수 시크릿 `APNS_TEAM_ID`·`APNS_KEY_ID`·`APNS_P8`은 `Server deploy`가 Actions의 `APPLE_TEAM_ID`(없으면 `APNS_TEAM_ID`)·`APNS_KEY_ID`·`APNS_P8`로 자동 등록합니다.

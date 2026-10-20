@@ -6,6 +6,8 @@
 //   update-sample  : 채널로 샘플 업데이트 (priority 5)
 //   end-sample     : 채널로 종료 (즉시 사라짐)
 //   send-alert     : 기기 토큰(deviceToken)으로 일반 알림
+// deviceToken을 빼면 그 환경(env)에서 가장 최근에 앱이 등록한 기기의 토큰을 DB에서 꺼내 쓴다.
+// 토큰을 휴대폰에서 복사해 올 필요가 없고, 응답에는 기기 ID 앞 8자리만 싣는다.
 import {
   type ApnsEnv,
   broadcast,
@@ -18,11 +20,21 @@ import {
   sendToDevice,
 } from "../_shared/apns.ts";
 import { sampleCommute } from "../_shared/commute_sample.ts";
+import { type Repo, supabaseRepo } from "../_shared/db.ts";
 import { checkSpikeToken, json } from "../_shared/guard.ts";
 
 const REQUIRED = ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_P8"] as const;
 const bundleId = Deno.env.get("APNS_BUNDLE_ID") ?? "io.github.swpark3179.weatherbridge";
 let tokens: ProviderTokenCache | null = null;
+let repo: Repo | null = null;
+
+/** 요청에 토큰이 없으면 DB에 등록된 최근 기기의 토큰. 없으면 null. */
+async function resolveToken(given: string | undefined, env: ApnsEnv, kind: "apns" | "pushToStart") {
+  if (given) return { token: given, device: null };
+  const d = await (repo ??= supabaseRepo()).latestDevice(env);
+  const token = kind === "apns" ? d?.apnsToken : d?.pushToStartToken;
+  return d && token ? { token, device: d.id.slice(0, 8) } : null;
+}
 
 Deno.serve(async (req) => {
   const denied = checkSpikeToken(req, Deno.env.get("SPIKE_TOKEN"));
@@ -56,13 +68,20 @@ Deno.serve(async (req) => {
       case "create-channel":
         return json(await createChannel({ env, providerToken, bundleId, storagePolicy: 1 }));
 
-      case "start-sample":
-        if (!input.deviceToken) return json({ error: "deviceToken(push-to-start 토큰) 필요" }, 400);
-        return json(
-          await sendToDevice({
+      case "start-sample": {
+        const target = await resolveToken(input.deviceToken, env, "pushToStart");
+        if (!target) {
+          return json({
+            error:
+              `${env} 기기의 push-to-start 토큰이 없습니다. 앱을 한 번 열거나 deviceToken을 주세요`,
+          }, 404);
+        }
+        return json({
+          device: target.device,
+          ...await sendToDevice({
             env,
             providerToken,
-            deviceToken: input.deviceToken,
+            deviceToken: target.token,
             topic: liveActivityTopic(bundleId),
             pushType: "liveactivity",
             priority: 10,
@@ -74,7 +93,8 @@ Deno.serve(async (req) => {
               channelId: input.channelId,
             }),
           }),
-        );
+        });
+      }
 
       case "update-sample":
       case "end-sample": {
@@ -96,19 +116,27 @@ Deno.serve(async (req) => {
         );
       }
 
-      case "send-alert":
-        if (!input.deviceToken) return json({ error: "deviceToken(APNs 기기 토큰) 필요" }, 400);
-        return json(
-          await sendToDevice({
+      case "send-alert": {
+        const target = await resolveToken(input.deviceToken, env, "apns");
+        if (!target) {
+          return json(
+            { error: `${env} 기기가 없습니다. 앱을 한 번 열거나 deviceToken을 주세요` },
+            404,
+          );
+        }
+        return json({
+          device: target.device,
+          ...await sendToDevice({
             env,
             providerToken,
-            deviceToken: input.deviceToken,
+            deviceToken: target.token,
             topic: bundleId,
             pushType: "alert",
             priority: 10,
             payload: { aps: { alert: { title: "WeatherBridge", body: "APNs 테스트 알림" } } },
           }),
-        );
+        });
+      }
 
       default:
         return json({
