@@ -80,6 +80,7 @@ WeatherBridge/
 ### 데이터 계약
 - Live Activity 페이로드(`CommuteActivityAttributes`, `CommuteState`)는 `WeatherCore`에 정의하고, 서버 `apns.ts`가 같은 키로 생성.
 - 계약 샘플 `ios/Packages/WeatherCore/Tests/WeatherCoreTests/Fixtures/live_activity_start.json`을 **서버 테스트(생성 결과와 일치)와 Swift 테스트(디코딩 가능)가 함께 검증**.
+- 앱 `today` 응답(`TodayResponse`)도 같은 방식: `Fixtures/today_response.json` (서버에서 `deno task fixtures`로 다시 만든다).
 - 날짜는 epoch 초(Int)로 주고받음.
 
 ### 주요 테이블

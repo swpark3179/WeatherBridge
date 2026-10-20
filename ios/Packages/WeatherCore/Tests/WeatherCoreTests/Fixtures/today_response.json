@@ -1,0 +1,324 @@
+{
+  "generatedAt": 1792444200,
+  "tz": "Asia/Seoul",
+  "threshold": 30,
+  "briefing": {
+    "state": {
+      "headline": "☔ 집 8–10시 최대 68%",
+      "highlight": true,
+      "places": [
+        {
+          "name": "집",
+          "temp": 15,
+          "pops": [
+            4,
+            16,
+            51,
+            68,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "maxPop": 68,
+          "rainWindow": "8–10시"
+        },
+        {
+          "name": "회사",
+          "temp": 14,
+          "pops": [
+            0,
+            1,
+            7,
+            9,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "maxPop": 9,
+          "rainWindow": null
+        }
+      ],
+      "updatedAt": 1792444200
+    },
+    "firstHour": 6,
+    "summary": "집 ☔ 8–10시 최대 68% / 회사 비 소식 없음(최대 9%)"
+  },
+  "places": [
+    {
+      "id": "home-id",
+      "kind": "home",
+      "name": "집",
+      "maxPop": 68,
+      "highlight": true,
+      "windows": [
+        {
+          "start": 1792450800,
+          "end": 1792458000,
+          "maxPop": 68,
+          "agreeing": 4,
+          "total": 4
+        }
+      ],
+      "hours": [
+        {
+          "t": 1792443600,
+          "consensus": 4,
+          "min": 0,
+          "max": 10,
+          "agreeing": 0,
+          "total": 4,
+          "split": false,
+          "rainy": false,
+          "temp": 15,
+          "families": {
+            "kma": 10,
+            "ecmwf": 5,
+            "ncep": 0,
+            "dwd": 0
+          },
+          "providers": {
+            "kma_short": 10,
+            "om_ecmwf": 5,
+            "om_gfs": 0,
+            "om_icon": 0
+          }
+        },
+        {
+          "t": 1792447200,
+          "consensus": 16,
+          "min": 0,
+          "max": 30,
+          "agreeing": 1,
+          "total": 4,
+          "split": false,
+          "rainy": false,
+          "temp": 16,
+          "families": {
+            "kma": 20,
+            "ecmwf": 30,
+            "ncep": 10,
+            "dwd": 0
+          },
+          "providers": {
+            "kma_short": 20,
+            "om_ecmwf": 30,
+            "om_gfs": 10,
+            "om_icon": 0
+          }
+        },
+        {
+          "t": 1792450800,
+          "consensus": 51,
+          "min": 20,
+          "max": 80,
+          "agreeing": 3,
+          "total": 4,
+          "split": true,
+          "rainy": true,
+          "temp": 17,
+          "families": {
+            "kma": 60,
+            "ecmwf": 80,
+            "ncep": 40,
+            "dwd": 20
+          },
+          "providers": {
+            "kma_short": 60,
+            "om_ecmwf": 80,
+            "om_gfs": 40,
+            "om_icon": 20
+          }
+        },
+        {
+          "t": 1792454400,
+          "consensus": 68,
+          "min": 50,
+          "max": 90,
+          "agreeing": 4,
+          "total": 4,
+          "split": true,
+          "rainy": true,
+          "temp": 17,
+          "families": {
+            "kma": 70,
+            "ecmwf": 90,
+            "ncep": 60,
+            "dwd": 50
+          },
+          "providers": {
+            "kma_short": 70,
+            "om_ecmwf": 90,
+            "om_gfs": 60,
+            "om_icon": 50
+          }
+        }
+      ],
+      "sources": [
+        {
+          "provider": "kma_short",
+          "family": "kma",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        },
+        {
+          "provider": "om_ecmwf",
+          "family": "ecmwf",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        },
+        {
+          "provider": "om_gfs",
+          "family": "ncep",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        },
+        {
+          "provider": "om_icon",
+          "family": "dwd",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "office-id",
+      "kind": "office",
+      "name": "회사",
+      "maxPop": 9,
+      "highlight": false,
+      "windows": [],
+      "hours": [
+        {
+          "t": 1792443600,
+          "consensus": 0,
+          "min": 0,
+          "max": 0,
+          "agreeing": 0,
+          "total": 3,
+          "split": false,
+          "rainy": false,
+          "temp": 14,
+          "families": {
+            "kma": 0,
+            "ecmwf": 0,
+            "ncep": 0
+          },
+          "providers": {
+            "kma_short": 0,
+            "om_ecmwf": 0,
+            "om_gfs": 0
+          }
+        },
+        {
+          "t": 1792447200,
+          "consensus": 1,
+          "min": 0,
+          "max": 5,
+          "agreeing": 0,
+          "total": 3,
+          "split": false,
+          "rainy": false,
+          "temp": 15,
+          "families": {
+            "kma": 0,
+            "ecmwf": 5,
+            "ncep": 0
+          },
+          "providers": {
+            "kma_short": 0,
+            "om_ecmwf": 5,
+            "om_gfs": 0
+          }
+        },
+        {
+          "t": 1792450800,
+          "consensus": 7,
+          "min": 0,
+          "max": 10,
+          "agreeing": 0,
+          "total": 3,
+          "split": false,
+          "rainy": false,
+          "temp": 16,
+          "families": {
+            "kma": 10,
+            "ecmwf": 10,
+            "ncep": 0
+          },
+          "providers": {
+            "kma_short": 10,
+            "om_ecmwf": 10,
+            "om_gfs": 0
+          }
+        },
+        {
+          "t": 1792454400,
+          "consensus": 9,
+          "min": 0,
+          "max": 15,
+          "agreeing": 0,
+          "total": 3,
+          "split": false,
+          "rainy": false,
+          "temp": 16,
+          "families": {
+            "kma": 10,
+            "ecmwf": 15,
+            "ncep": 0
+          },
+          "providers": {
+            "kma_short": 10,
+            "om_ecmwf": 15,
+            "om_gfs": 0
+          }
+        }
+      ],
+      "sources": [
+        {
+          "provider": "kma_short",
+          "family": "kma",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        },
+        {
+          "provider": "om_ecmwf",
+          "family": "ecmwf",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        },
+        {
+          "provider": "om_gfs",
+          "family": "ncep",
+          "issuedAt": 1792440000,
+          "fetchedAt": 1792441200
+        }
+      ],
+      "errors": [
+        "om_icon: timeout"
+      ]
+    }
+  ]
+}

@@ -62,6 +62,25 @@ select provider, loc_key, issued_at from public.forecast_log order by id desc li
 select * from public.obs_log order by obs_time desc limit 5;
 ```
 
+## Phase 2 서버 준비 (1회)
+앱은 익명 로그인(Supabase Auth)으로 사용자를 만들고, 서버 함수 `today`는 그 사용자 토큰을 `@supabase/server`로 검증합니다.
+
+1. **JWT 서명 키 확인**: 대시보드 → Project Settings → **JWT Keys**
+   - 현재 키(Current key)가 **ECC (P-256)** 같은 비대칭 키인지 확인합니다.
+   - Legacy JWT secret(HS256)이면 "Rotate keys" 등으로 ECC 키로 바꿉니다.
+   - `@supabase/server`는 HS256 사용자 토큰을 거부합니다. 바꾸지 않으면 앱의 모든 `today` 호출이 401이 됩니다.
+2. **익명 로그인 켜기**: Authentication → Sign In / Providers → **Allow anonymous sign-ins** 켜기 → Save
+   - 기본 제한은 IP당 시간당 30회입니다.
+3. 배포는 `Server deploy`가 합니다(마이그레이션 2개, `today`·`dispatch` 함수, 매분 cron).
+4. `Server smoke`는 매일 익명 사용자를 하나 만들어 앱 경로(장소 등록 → `today` → 알림 문구 미리 보기)를 점검하고 바로 지웁니다. Actions secret `SUPABASE_API_KEY`(publishable)를 씁니다.
+
+확인용 SQL
+```sql
+select jobname, schedule, active from cron.job;                 -- weatherbridge-dispatch(매분) 포함
+select user_id, kind, local_date, status, attempts, detail from public.dispatch_log order by id desc limit 5;
+select count(*) filter (where active) as active_devices from public.devices;
+```
+
 ## Phase 0에서 설정한 것 (참고)
 
 ### Supabase 프로젝트

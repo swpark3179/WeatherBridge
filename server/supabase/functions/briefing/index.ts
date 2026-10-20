@@ -1,9 +1,9 @@
-// 집·회사 오늘 브리핑 (요약 알림·잠금화면 공통 형식). GET
+// 운영자 점검용 집·회사 오늘 브리핑 (요약 알림·잠금화면 공통 형식). GET
 import { aggregate } from "../_shared/aggregate.ts";
 import { buildBriefing, restOfLocalDay } from "../_shared/briefing.ts";
 import { ensureForecasts } from "../_shared/forecast_service.ts";
 import { checkSpikeToken, json } from "../_shared/guard.ts";
-import { liveDeps, publicPlace } from "../_shared/live.ts";
+import { liveDeps, operatorPlaces, publicPlace } from "../_shared/live.ts";
 
 Deno.serve(async (req) => {
   const denied = checkSpikeToken(req, Deno.env.get("SPIKE_TOKEN"));
@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
 
   try {
     const deps = liveDeps();
-    const places = await deps.repo.listActivePlaces();
+    const places = await operatorPlaces(deps);
     const targets = (["home", "office"] as const)
       .map((kind) => places.find((p) => p.kind === kind))
       .filter((p) => p !== undefined);

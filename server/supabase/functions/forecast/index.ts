@@ -1,4 +1,4 @@
-// 장소별 시간대별 강수확률 종합 (향후 48시간). GET ?kind=home|office 또는 ?place_id=
+// 운영자 점검용 장소별 시간대별 강수확률 종합 (향후 48시간). GET ?kind=home|office 또는 ?place_id=
 import { aggregate } from "../_shared/aggregate.ts";
 import { ensureForecasts } from "../_shared/forecast_service.ts";
 import { checkSpikeToken, json } from "../_shared/guard.ts";

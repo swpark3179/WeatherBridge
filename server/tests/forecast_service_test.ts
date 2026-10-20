@@ -9,6 +9,7 @@ const H = 3600;
 function place(overrides: Partial<Place> = {}): Place {
   return {
     id: crypto.randomUUID(),
+    userId: null,
     kind: "home",
     name: "집",
     lat: 37.57,

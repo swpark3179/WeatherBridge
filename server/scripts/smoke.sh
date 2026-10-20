@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # 배포된 Edge Functions 점검. 좌표·토큰은 출력하지 않는다.
-#   PROJECT_ID=<ref> SPIKE_TOKEN=<token> [SUPABASE_REGION=ap-northeast-2] bash server/scripts/smoke.sh
+#   PROJECT_ID=<ref> SPIKE_TOKEN=<token> [SUPABASE_REGION=ap-northeast-2] [SUPABASE_API_KEY=sb_publishable_…] \
+#     bash server/scripts/smoke.sh
 # SUPABASE_REGION을 주면 그 리전에서 함수를 실행한다(x-region). 없으면 호출한 곳에서 가까운 리전.
+# SUPABASE_API_KEY(publishable)를 주면 익명 사용자를 만들어 앱 경로(set_place → today)를 점검하고 지운다.
 # SMOKE_BASE_URL을 주면 그 주소로 호출한다(로컬 확인용).
 set -uo pipefail
 
 : "${SPIKE_TOKEN:?SPIKE_TOKEN이 필요합니다}"
 BASE="${SMOKE_BASE_URL:-https://${PROJECT_ID:?SUPABASE_PROJECT_ID가 필요합니다}.supabase.co/functions/v1}"
+ROOT="${BASE%/functions/v1}"
 FAILED=0
 REGION_HEADER=()
 [ -n "${SUPABASE_REGION:-}" ] && REGION_HEADER=(-H "x-region: ${SUPABASE_REGION}")
@@ -16,6 +19,16 @@ call() {
   local out
   out=$(curl -sS -X "$1" -H "x-spike-token: ${SPIKE_TOKEN}" ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} \
     -w $'\n%{http_code}' "${BASE}/$2")
+  BODY=$(printf '%s' "$out" | sed '$d')
+  STATUS=$(printf '%s' "$out" | tail -n1)
+}
+# app METHOD URL [JSON] → 앱처럼 publishable key(+ 사용자 토큰)로 호출. BODY, STATUS
+app() {
+  local out auth=()
+  [ -n "${USER_TOKEN:-}" ] && auth=(-H "authorization: Bearer ${USER_TOKEN}")
+  out=$(curl -sS -X "$1" -H "apikey: ${SUPABASE_API_KEY}" ${auth[@]+"${auth[@]}"} \
+    ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} -H "content-type: application/json" \
+    ${3:+-d "$3"} -w $'\n%{http_code}' "$2")
   BODY=$(printf '%s' "$out" | sed '$d')
   STATUS=$(printf '%s' "$out" | tail -n1)
 }
@@ -78,6 +91,64 @@ elif [ "$STATUS" != 200 ]; then
 else
   echo "$BODY" | jq '{headline: .state.headline, highlight: .state.highlight, summary, firstHour,
     places: [.state.places[] | {name, temp, maxPop, rainWindow}], errors}'
+fi
+
+echo "## 5. dispatch (요약 알림, 발송 없이)"
+call GET "dispatch?dry_run=1"
+if [ "$STATUS" != 200 ]; then
+  fail "dispatch HTTP $STATUS: $BODY"
+else
+  echo "$BODY" | jq '{candidates, due, errors}'
+  [ "$(echo "$BODY" | jq '.errors | length')" -eq 0 ] || warn "dispatch 오류: $(echo "$BODY" | jq -c '.errors')"
+fi
+
+echo "## 6. today (앱 사용자 인증)"
+STATUS=$(curl -sS -o /dev/null -w '%{http_code}' ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} "${BASE}/today")
+[ "$STATUS" = 401 ] && echo "토큰 없이 호출 → 401 (정상)" || fail "today가 토큰 없이 HTTP $STATUS를 돌려줬습니다 (401이어야 함)"
+
+if [ -z "${SUPABASE_API_KEY:-}" ]; then
+  warn "SUPABASE_API_KEY가 없어 익명 사용자 점검을 건너뜁니다"
+else
+  USER_TOKEN=""
+  app POST "${ROOT}/auth/v1/signup" '{}'
+  if [ "$STATUS" != 200 ]; then
+    warn "익명 가입 실패 HTTP $STATUS: $(echo "$BODY" | jq -c '{code, msg: (.msg // .message)}' 2>/dev/null) — Supabase에서 Allow anonymous sign-ins를 켰는지 확인 (docs/setup.md)"
+  else
+    USER_TOKEN=$(echo "$BODY" | jq -r '.access_token')
+    USER_ID=$(echo "$BODY" | jq -r '.user.id')
+    echo "익명 사용자 ${USER_ID:0:8}… 생성"
+    # 점검이 실패해도 사용자는 지운다
+    cleanup() {
+      [ -n "${USER_TOKEN:-}" ] || return 0
+      app POST "${ROOT}/rest/v1/rpc/delete_my_account" '{}'
+      [[ "$STATUS" == 20[04] ]] && echo "익명 사용자 삭제" || fail "delete_my_account HTTP $STATUS: $BODY"
+      USER_TOKEN=""
+    }
+    trap cleanup EXIT
+
+    # 공개 좌표(서울시청)
+    app POST "${ROOT}/rest/v1/rpc/set_place" '{"p_kind":"home","p_name":"점검","p_lat":37.5665,"p_lon":126.978}'
+    [ "$STATUS" = 200 ] || fail "set_place HTTP $STATUS: $BODY"
+
+    app GET "${BASE}/today"
+    if [ "$STATUS" != 200 ]; then
+      fail "today HTTP $STATUS: $BODY"
+    else
+      echo "$BODY" | jq '{threshold, headline: .briefing.state.headline,
+        places: [.places[] | {kind, name, maxPop, hours: (.hours | length),
+          sources: [.sources[].provider], errors}]}'
+      [ "$(echo "$BODY" | jq '.places[0].sources | length')" -ge 3 ] || fail "today 소스가 3개 미만"
+      echo "$BODY" | jq -e 'tostring | test("37\\.5") | not' >/dev/null || fail "today 응답에 좌표가 있습니다"
+    fi
+
+    call GET "dispatch?dry_run=1&user_id=${USER_ID}"
+    if [ "$STATUS" = 200 ]; then
+      echo "$BODY" | jq '{preview: .previews[0].payload.aps.alert}'
+    else
+      fail "dispatch(dry_run, user) HTTP $STATUS: $BODY"
+    fi
+    cleanup
+  fi
 fi
 
 exit $FAILED

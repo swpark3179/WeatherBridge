@@ -59,6 +59,12 @@ Deno.test("weights KMA 1.5 against other families", () => {
   assertEquals(r.hours[0].rainy, true);
 });
 
+Deno.test("keeps each source's value next to the family values", () => {
+  const r = aggregate([fc("kma_short", [10]), fc("om_ecmwf", [60])], range(1));
+  assertEquals(r.hours[0].providers, { kma_short: 10, om_ecmwf: 60 });
+  assertEquals(r.hours[0].families, { kma: 10, ecmwf: 60 });
+});
+
 Deno.test("two families at 60%+ trigger highlight even with a low consensus", () => {
   const r = aggregate([fc("om_ecmwf", [70]), fc("om_gfs", [60]), fc("om_icon", [0])], range(1));
   assertEquals(r.hours[0].consensus, 43);

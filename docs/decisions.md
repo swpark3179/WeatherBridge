@@ -17,3 +17,6 @@
 | D13 | 서버는 **새 API 키 체계**(`SUPABASE_SECRET_KEYS`, publishable key) 사용, legacy anon/service_role 키는 쓰지 않음 | legacy 키는 2026년 말 폐기 예정 | 2026-10-18 |
 | D14 | TestFlight 빌드는 **배포 인증서 + App Store 프로파일로 수동 서명**, 프로파일은 App Store Connect API로 이름을 찾아 설치 (`iOS TestFlight` 워크플로) | 자동 서명은 등록 기기가 없으면 개발용 프로파일을 못 만들고, 임시 러너마다 인증서가 새로 생기며 Admin 키가 필요. 수동 서명은 매번 같은 인증서를 써서 안정적 | 2026-10-20 |
 | D15 | 프로젝트 ref·publishable key는 **빌드할 때 빌드 설정으로 주입**(Info.plist `WBSupabase*`), `aps-environment`는 구성별(Debug development / Release production) | 공개 저장소에 접속 정보를 남기지 않음. TestFlight 앱은 production APNs를 쓰므로 서명 프로파일과 entitlement가 일치해야 함 | 2026-10-20 |
+| D16 | 요약 알림은 **pg_cron이 매분 `dispatch`를 호출**하고, 보낼지 여부(현지 예정 시각·15분 창·하루 1회)는 함수(`schedule.ts`)가 판단 | 판단 로직을 SQL에 두면 테스트할 수 없음. 월 약 4.5만 회 호출로 무료 한도(50만) 안. Phase 3 출근 브리핑도 같은 경로를 씀 | 2026-10-20 |
+| D17 | 앱의 쓰기는 **RPC(`set_place`, `register_device`, `delete_my_account`)**로만, 읽기는 RLS(본인 행). 운영 토큰 함수(`forecast`·`briefing`)는 `user_id`가 없는 운영자 장소만 쓴다 | 좌표 반올림·사용자당 집·회사 1곳·재설치 시 기기 이전을 서버에서 보장. 점검 결과가 앱 사용자 데이터에 흔들리지 않음 | 2026-10-20 |
+| D18 | 재설치 대비 **복구 코드는 보류**. 세션은 키체인에 두고, 새 기기에서는 다시 온보딩 | 개인·지인용이라 집·회사 2곳을 다시 등록하는 비용이 작음. 필요해지면 RPC 한 쌍으로 추가 | 2026-10-20 |
