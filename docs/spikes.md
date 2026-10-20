@@ -41,22 +41,23 @@ $r | ConvertTo-Json -Depth 10
 ## S2. 서버 → APNs 발송 (`spike-apns`) — 개발자 계정 필요
 Edge Function에서 APNs(HTTP/2)로 발송되는지와 Live Activity 브로드캐스트 흐름 전체를 확인.
 
-준비: [setup.md](setup.md) 4~6번, TestFlight로 앱 설치 → 실험실 탭에서 **push-to-start 토큰** 복사.
+준비: [setup.md](setup.md) "TestFlight 배포" → `Server deploy` 실행(APNs 시크릿 동기화) → TestFlight로 앱 설치 → 실험실 탭에서 **push-to-start 토큰** 복사.
+
+TestFlight 앱은 production APNs를 쓰므로 모든 요청에 `"env":"production"`을 넣습니다.
 
 ```bash
 F=https://<project-ref>.supabase.co/functions/v1/spike-apns
 H=(-H "x-spike-token: $SPIKE_TOKEN" -H "content-type: application/json")
 
 # 1) 채널 생성 → 응답의 channelId 기록
-curl -s $F "${H[@]}" -d '{"action":"create-channel"}'
+curl -s $F "${H[@]}" -d '{"action":"create-channel","env":"production"}'
 # 2) 원격 시작 (앱이 꺼진 상태에서도 잠금화면에 떠야 함)
-curl -s $F "${H[@]}" -d '{"action":"start-sample","deviceToken":"<push-to-start 토큰>","channelId":"<채널>","minutes":10}'
+curl -s $F "${H[@]}" -d '{"action":"start-sample","env":"production","deviceToken":"<push-to-start 토큰>","channelId":"<채널>","minutes":10}'
 # 3) 채널로 업데이트 → 헤드라인이 "업데이트된 샘플"로 바뀌는지
-curl -s $F "${H[@]}" -d '{"action":"update-sample","channelId":"<채널>"}'
+curl -s $F "${H[@]}" -d '{"action":"update-sample","env":"production","channelId":"<채널>"}'
 # 4) 종료 → 즉시 사라지는지
-curl -s $F "${H[@]}" -d '{"action":"end-sample","channelId":"<채널>"}'
+curl -s $F "${H[@]}" -d '{"action":"end-sample","env":"production","channelId":"<채널>"}'
 ```
-TestFlight 빌드는 production APNs를 쓰므로 `"env":"production"`을 추가합니다.
 
 PowerShell에서는 본문을 해시테이블로 만들어 보냅니다.
 ```powershell
@@ -66,10 +67,10 @@ function Spike($body) {
   Invoke-RestMethod -Method Post -Uri $F -Headers $H -ContentType "application/json" `
     -Body ($body | ConvertTo-Json) | ConvertTo-Json -Depth 10
 }
-Spike @{ action = "create-channel" }
-Spike @{ action = "start-sample"; deviceToken = "<push-to-start 토큰>"; channelId = "<채널>"; minutes = 10 }
-Spike @{ action = "update-sample"; channelId = "<채널>" }
-Spike @{ action = "end-sample"; channelId = "<채널>" }
+Spike @{ action = "create-channel"; env = "production" }
+Spike @{ action = "start-sample"; env = "production"; deviceToken = "<push-to-start 토큰>"; channelId = "<채널>"; minutes = 10 }
+Spike @{ action = "update-sample"; env = "production"; channelId = "<채널>" }
+Spike @{ action = "end-sample"; env = "production"; channelId = "<채널>" }
 ```
 
 - 합격 기준

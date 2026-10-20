@@ -15,3 +15,5 @@
 | D11 | 서버 배포는 **GitHub Actions**(`server-deploy.yml`), 점검은 `server-smoke.yml`(매일 실행) | Claude가 워크플로를 실행해 배포·점검까지 할 수 있고, 매일 호출로 무료 프로젝트의 7일 무활동 일시정지도 막음 | 2026-10-18 |
 | D12 | Phase 1 함수(`refresh`·`forecast`·`briefing`)는 **운영 토큰 `SPIKE_TOKEN`**으로 보호 | 앱 사용자가 아직 없음. Phase 2 앱용 함수는 Supabase 권장 방식(사용자 JWT, `@supabase/server`)으로 전환 | 2026-10-18 |
 | D13 | 서버는 **새 API 키 체계**(`SUPABASE_SECRET_KEYS`, publishable key) 사용, legacy anon/service_role 키는 쓰지 않음 | legacy 키는 2026년 말 폐기 예정 | 2026-10-18 |
+| D14 | TestFlight 빌드는 **배포 인증서 + App Store 프로파일로 수동 서명**, 프로파일은 App Store Connect API로 이름을 찾아 설치 (`iOS TestFlight` 워크플로) | 자동 서명은 등록 기기가 없으면 개발용 프로파일을 못 만들고, 임시 러너마다 인증서가 새로 생기며 Admin 키가 필요. 수동 서명은 매번 같은 인증서를 써서 안정적 | 2026-10-20 |
+| D15 | 프로젝트 ref·publishable key는 **빌드할 때 빌드 설정으로 주입**(Info.plist `WBSupabase*`), `aps-environment`는 구성별(Debug development / Release production) | 공개 저장소에 접속 정보를 남기지 않음. TestFlight 앱은 production APNs를 쓰므로 서명 프로파일과 entitlement가 일치해야 함 | 2026-10-20 |

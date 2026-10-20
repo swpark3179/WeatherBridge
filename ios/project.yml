@@ -14,9 +14,21 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
-    CODE_SIGN_STYLE: Automatic
-    # Apple Developer 가입 후 팀 ID를 넣는다 (docs/setup.md)
+    # 팀 ID·서버 접속 정보는 저장소에 넣지 않고 빌드할 때 넘긴다 (.github/workflows/ios-testflight.yml)
     DEVELOPMENT_TEAM: ""
+    WB_SUPABASE_PROJECT_REF: ""
+    WB_SUPABASE_PUBLISHABLE_KEY: ""
+  configs:
+    Debug:
+      CODE_SIGN_STYLE: Automatic
+      WB_APS_ENVIRONMENT: development
+      WB_APNS_ENV: sandbox
+    # TestFlight 빌드: 배포 인증서 + App Store 프로파일로 수동 서명 (docs/setup.md)
+    Release:
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: Apple Distribution
+      WB_APS_ENVIRONMENT: production
+      WB_APNS_ENV: production
 
 packages:
   WeatherCore:
@@ -41,13 +53,21 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSSupportsLiveActivities: true
         UIBackgroundModes: [remote-notification]
+        ITSAppUsesNonExemptEncryption: false
+        WBSupabaseProjectRef: $(WB_SUPABASE_PROJECT_REF)
+        WBSupabasePublishableKey: $(WB_SUPABASE_PUBLISHABLE_KEY)
+        WBApnsEnv: $(WB_APNS_ENV)
     entitlements:
       path: WeatherBridge/WeatherBridge.entitlements
       properties:
-        aps-environment: development
+        aps-environment: $(WB_APS_ENVIRONMENT)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.swpark3179.weatherbridge
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: WeatherBridge AppStore
 
   CommuteWidget:
     type: app-extension
@@ -68,6 +88,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.swpark3179.weatherbridge.CommuteWidget
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: WeatherBridge Widget AppStore
 
 schemes:
   WeatherBridge:

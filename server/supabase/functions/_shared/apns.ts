@@ -4,6 +4,7 @@
  * - 브로드캐스트(iOS 18+): 채널 생성 POST /1/apps/<bundle>/channels, 발송 POST /4/broadcasts/apps/<bundle>
  * Live Activity 페이로드 키는 ios/Packages/WeatherCore의 CommuteActivityAttributes / CommuteState와 같다.
  */
+import { signEs256Jwt } from "./es256.ts";
 
 export type ApnsEnv = "sandbox" | "production";
 
@@ -107,24 +108,12 @@ export interface ApnsKey {
   privateKeyPem: string;
 }
 
-export async function createProviderToken(key: ApnsKey, nowSec: number): Promise<string> {
-  const header = b64url(JSON.stringify({ alg: "ES256", kid: key.keyId }));
-  const claims = b64url(JSON.stringify({ iss: key.teamId, iat: nowSec }));
-  const signingInput = `${header}.${claims}`;
-  const cryptoKey = await crypto.subtle.importKey(
-    "pkcs8",
-    pemToDer(key.privateKeyPem),
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
+export function createProviderToken(key: ApnsKey, nowSec: number): Promise<string> {
+  return signEs256Jwt(
+    { alg: "ES256", kid: key.keyId },
+    { iss: key.teamId, iat: nowSec },
+    key.privateKeyPem,
   );
-  // WebCrypto ECDSA 서명은 JWS가 요구하는 r||s(64바이트) 형식이다.
-  const sig = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    cryptoKey,
-    new TextEncoder().encode(signingInput),
-  );
-  return `${signingInput}.${b64url(new Uint8Array(sig))}`;
 }
 
 /**
@@ -248,21 +237,4 @@ async function request(
     channelId: res.headers.get("apns-channel-id"),
     body,
   };
-}
-
-// ---------- 유틸 ----------
-
-function pemToDer(pem: string): ArrayBuffer {
-  const base64 = pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-  const bin = atob(base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes.buffer;
-}
-
-function b64url(input: string | Uint8Array): string {
-  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

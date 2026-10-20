@@ -61,6 +61,23 @@ Deno.test("provider token is a valid ES256 JWT", async () => {
   assert(valid);
 });
 
+Deno.test("provider token accepts a one-line PEM (deploy workflow strips newlines)", async () => {
+  const { pem, publicKey } = await testKey();
+  const jwt = await createProviderToken({
+    teamId: "TEAM123456",
+    keyId: "KEY1234567",
+    privateKeyPem: pem.replace(/\r?\n/g, ""),
+  }, 1_700_000_000);
+  const [h, c, s] = jwt.split(".");
+  const valid = await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    publicKey,
+    b64urlDecode(s),
+    new TextEncoder().encode(`${h}.${c}`),
+  );
+  assert(valid);
+});
+
 Deno.test("provider token cache reuses token for 50 minutes", async () => {
   const { pem } = await testKey();
   const cache = new ProviderTokenCache({ teamId: "T", keyId: "K", privateKeyPem: pem });

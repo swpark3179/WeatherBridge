@@ -2,7 +2,8 @@ name: Server deploy
 
 # 마이그레이션 적용 + 함수 시크릿 동기화 + Edge Functions 배포.
 # 필요한 Actions secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID, SPIKE_TOKEN
-# (선택) KMA_SERVICE_KEY — 있으면 함수 시크릿으로 함께 등록한다. 자세한 내용은 docs/setup.md
+# (선택) KMA_SERVICE_KEY, APPLE_TEAM_ID(또는 APNS_TEAM_ID)·APNS_KEY_ID·APNS_P8 — 있으면 함수 시크릿으로 함께 등록한다.
+# 자세한 내용은 docs/setup.md
 on:
   workflow_dispatch:
   push:
@@ -56,10 +57,23 @@ jobs:
         env:
           SPIKE_TOKEN: ${{ secrets.SPIKE_TOKEN }}
           KMA_SERVICE_KEY: ${{ secrets.KMA_SERVICE_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APNS_TEAM_ID }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_P8: ${{ secrets.APNS_P8 }}
         run: |
           args=()
           [ -n "$SPIKE_TOKEN" ] && args+=("SPIKE_TOKEN=$SPIKE_TOKEN")
           [ -n "$KMA_SERVICE_KEY" ] && args+=("KMA_SERVICE_KEY=$KMA_SERVICE_KEY")
+          # APNs 키 3개는 함께 있어야 쓸모가 있다. .p8은 여러 줄이라 줄바꿈을 빼고 한 줄로 넘긴다(함수가 그대로 읽는다).
+          if [ -n "$APPLE_TEAM_ID" ] && [ -n "$APNS_KEY_ID" ] && [ -n "$APNS_P8" ]; then
+            args+=("APNS_TEAM_ID=$(printf '%s' "$APPLE_TEAM_ID" | tr -d '[:space:]')")
+            args+=("APNS_KEY_ID=$(printf '%s' "$APNS_KEY_ID" | tr -d '[:space:]')")
+            args+=("APNS_P8=$(printf '%s' "$APNS_P8" | tr -d '\r\n')")
+          else
+            missing=""
+            for v in APPLE_TEAM_ID APNS_KEY_ID APNS_P8; do [ -n "${!v}" ] || missing="$missing $v"; done
+            echo "::notice::Actions secrets에 없는 값이 있어 APNs 시크릿은 건너뜁니다:$missing"
+          fi
           if [ ${#args[@]} -gt 0 ]; then
             supabase secrets set --project-ref "$PROJECT_ID" "${args[@]}"
           fi

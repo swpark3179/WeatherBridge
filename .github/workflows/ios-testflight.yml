@@ -1,0 +1,216 @@
+name: iOS TestFlight
+
+# 배포 인증서로 수동 서명해 App Store Connect(TestFlight)에 올린다. 준비 절차는 docs/setup.md "TestFlight 배포".
+# 필요한 Actions secrets:
+#   APPLE_TEAM_ID(또는 APNS_TEAM_ID), ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (App Store Connect API 키, App Manager 이상)
+#   IOS_DIST_P12_B64, IOS_DIST_P12_PASSWORD (Apple Distribution 인증서)
+#   SUPABASE_PROJECT_ID, SUPABASE_API_KEY (publishable key, 앱에 들어간다)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+env:
+  APP_PROFILE: WeatherBridge AppStore
+  WIDGET_PROFILE: WeatherBridge Widget AppStore
+  APP_BUNDLE_ID: io.github.swpark3179.weatherbridge
+  WIDGET_BUNDLE_ID: io.github.swpark3179.weatherbridge.CommuteWidget
+
+jobs:
+  testflight:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APNS_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      IOS_DIST_P12_B64: ${{ secrets.IOS_DIST_P12_B64 }}
+      IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+      # 공개 저장소라 로그에 인증서 소유자 이름이 남지 않게 가린다
+      REDACT: 's/(Apple (Distribution|Development)): [^(]*\(/\1: <이름> (/g'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        run: |
+          missing=""
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 IOS_DIST_P12_B64 IOS_DIST_P12_PASSWORD \
+                   SUPABASE_PROJECT_ID SUPABASE_API_KEY; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Actions secrets가 없습니다:$missing (docs/setup.md 참고)"
+            exit 1
+          fi
+          # 한 줄짜리 값에 붙여넣기로 섞인 앞뒤 공백·줄바꿈은 서명·업로드 오류로만 보여서 미리 잡는다. 값은 출력하지 않는다.
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID SUPABASE_PROJECT_ID SUPABASE_API_KEY; do
+            if [[ "${!v}" =~ ^[[:space:]] || "${!v}" =~ [[:space:]]$ ]]; then
+              echo "::error::$v 값 앞뒤에 공백이나 줄바꿈이 있습니다. Actions secret을 다시 붙여넣어 주세요"
+              exit 1
+            fi
+          done
+          # 앱에는 publishable key만 들어가야 한다
+          if [[ "$SUPABASE_API_KEY" == sb_secret_* ]]; then
+            echo "::error::SUPABASE_API_KEY가 secret key입니다. publishable key(sb_publishable_…)를 넣어 주세요"
+            exit 1
+          fi
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install signing certificate
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+
+          printf '%s' "$IOS_DIST_P12_B64" | tr -d '\r\n ' | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/dist.p12" -P "$IOS_DIST_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/dist.p12"
+          # 배포 인증서 체인의 중간 인증서(WWDR G3)가 없으면 서명 ID가 유효하지 않다
+          curl -fsSL -o "$RUNNER_TEMP/wwdr.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/wwdr.cer" -k "$KEYCHAIN" || true
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          identities="$(security find-identity -v -p codesigning "$KEYCHAIN")"
+          echo "유효한 Apple Distribution 서명 ID: $(grep -c "Apple Distribution" <<<"$identities" || true)개"
+          if ! grep -q "Apple Distribution" <<<"$identities"; then
+            echo "::error::키체인에 유효한 Apple Distribution 서명 ID가 없습니다. .p12와 비밀번호를 확인해 주세요"
+            exit 1
+          fi
+
+      - name: Install provisioning profiles
+        working-directory: server
+        run: |
+          deno run --allow-env --allow-net=api.appstoreconnect.apple.com --allow-write \
+            scripts/asc_profiles.ts "$APP_PROFILE" "$WIDGET_PROFILE"
+
+      - name: Write App Store Connect key
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s\n' "$ASC_KEY_P8" | tr -d '\r' > "$KEY_PATH"
+          echo "ASC_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - run: brew install xcodegen
+      - run: xcodegen generate
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project WeatherBridge.xcodeproj \
+            -scheme WeatherBridge \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/WeatherBridge.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            WB_SUPABASE_PROJECT_REF="$SUPABASE_PROJECT_ID" \
+            WB_SUPABASE_PUBLISHABLE_KEY="$SUPABASE_API_KEY" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+            archive | tee archive.log \
+            | grep -E "error:|warning: .*(Sendable|retroactive|provision|sign)|ARCHIVE (SUCCEEDED|FAILED)" \
+            | sed -E "$REDACT" || true
+          grep -q "ARCHIVE SUCCEEDED" archive.log
+
+      - name: Verify archive
+        run: |
+          APP="$RUNNER_TEMP/WeatherBridge.xcarchive/Products/Applications/WeatherBridge.app"
+          WIDGET="$APP/PlugIns/CommuteWidget.appex"
+          codesign -d --entitlements - --xml "$APP" > "$RUNNER_TEMP/app.entitlements" 2>/dev/null
+          aps="$(plutil -extract aps-environment raw -o - "$RUNNER_TEMP/app.entitlements")"
+          app_build="$(plutil -extract CFBundleVersion raw -o - "$APP/Info.plist")"
+          widget_build="$(plutil -extract CFBundleVersion raw -o - "$WIDGET/Info.plist")"
+          echo "aps-environment=$aps, build app=$app_build widget=$widget_build"
+          [ "$aps" = production ] || { echo "::error::aps-environment가 production이 아닙니다: $aps"; exit 1; }
+          [ "$app_build" = "$BUILD_NUMBER" ] && [ "$widget_build" = "$BUILD_NUMBER" ] \
+            || { echo "::error::앱과 위젯의 빌드 번호가 다릅니다"; exit 1; }
+          ref="$(plutil -extract WBSupabaseProjectRef raw -o - "$APP/Info.plist")"
+          [ -n "$ref" ] || { echo "::error::앱에 Supabase 프로젝트 ref가 들어가지 않았습니다"; exit 1; }
+
+      - name: Upload to TestFlight
+        run: |
+          set -o pipefail
+          plutil -create xml1 "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert method -string app-store-connect "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert destination -string upload "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert teamID -string "$APPLE_TEAM_ID" "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert signingStyle -string manual "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert signingCertificate -string "Apple Distribution" "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert manageAppVersionAndBuildNumber -bool NO "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert uploadSymbols -bool YES "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert provisioningProfiles -dictionary "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert "provisioningProfiles.$APP_BUNDLE_ID" -string "$APP_PROFILE" "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -insert "provisioningProfiles.$WIDGET_BUNDLE_ID" -string "$WIDGET_PROFILE" "$RUNNER_TEMP/ExportOptions.plist"
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/WeatherBridge.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee export.log | grep -E "error:|Upload|EXPORT (SUCCEEDED|FAILED)|Progress" | sed -E "$REDACT" || true
+          grep -q "EXPORT SUCCEEDED" export.log
+          echo "### TestFlight 업로드: 빌드 $BUILD_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "App Store Connect 처리(수 분~30분)가 끝나면 TestFlight 앱에 나타납니다." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect logs
+        if: failure()
+        run: |
+          # 내보내기 실패 원인은 IDEDistribution 로그에 있다. 이름·팀 ID·접속 정보를 가린 사본만 남긴다.
+          mkdir -p "$RUNNER_TEMP/logs"
+          cp archive.log export.log "$RUNNER_TEMP/logs/" 2>/dev/null || true
+          dist_log="$(find "${TMPDIR:-/tmp}" -path "*.xcdistributionlogs/IDEDistribution.standard.log" 2>/dev/null | head -1)"
+          [ -n "$dist_log" ] && cp "$dist_log" "$RUNNER_TEMP/logs/"
+          python3 - "$RUNNER_TEMP/logs" <<'EOF'
+          import os, pathlib, re, sys
+          values = [os.environ.get(k, "") for k in
+                    ("APPLE_TEAM_ID", "SUPABASE_PROJECT_ID", "SUPABASE_API_KEY", "ASC_KEY_ID", "ASC_ISSUER_ID")]
+          for path in pathlib.Path(sys.argv[1]).iterdir():
+              text = path.read_text(errors="replace")
+              text = re.sub(r"(Apple (?:Distribution|Development)): [^(]*\(", r"\1: <이름> (", text)
+              for v in values:
+                  if v:
+                      text = text.replace(v, "***")
+              path.write_text(text)
+          EOF
+          for f in "$RUNNER_TEMP"/logs/*; do
+            echo "::group::$(basename "$f") (마지막 60줄)"; tail -n 60 "$f"; echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: testflight-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Clean up
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          rm -f "${ASC_KEY_PATH:-/nonexistent}"
+          rm -rf "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"
