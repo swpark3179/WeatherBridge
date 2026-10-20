@@ -51,14 +51,14 @@ struct ContentView: View {
         case .onboarding:
             OnboardingView()
         case .ready:
-            TabView {
-                Tab("오늘", systemImage: "cloud.sun") {
+            TabView(selection: $model.selectedTab) {
+                Tab("오늘", systemImage: "cloud.sun", value: AppTab.today) {
                     TodayView()
                 }
-                Tab("비교", systemImage: "square.grid.3x3.fill") {
+                Tab("비교", systemImage: "square.grid.3x3.fill", value: AppTab.compare) {
                     CompareView()
                 }
-                Tab("설정", systemImage: "gearshape") {
+                Tab("설정", systemImage: "gearshape", value: AppTab.settings) {
                     SettingsView()
                 }
             }

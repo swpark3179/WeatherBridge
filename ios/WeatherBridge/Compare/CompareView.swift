@@ -4,21 +4,20 @@ import WeatherCore
 /// 비교 화면: 장소별로 예보 소스 × 시간 강수확률 히트맵(앞으로 48시간)
 struct CompareView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selected: PlaceKind = .home
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let today = model.today, !today.places.isEmpty {
-                        Picker("장소", selection: $selected) {
+                        Picker("장소", selection: $model.comparePlace) {
                             ForEach(today.places) { place in
                                 Text(place.name).tag(place.kind)
                             }
                         }
                         .pickerStyle(.segmented)
 
-                        if let place = today.places.first(where: { $0.kind == selected }) ?? today.places.first {
+                        if let place = today.places.first(where: { $0.kind == model.comparePlace }) ?? today.places.first {
                             let heatmap = HeatmapModel(place: place, tz: today.tz, now: Int(Date().timeIntervalSince1970))
                             HeatmapView(model: heatmap)
                             Legend()
