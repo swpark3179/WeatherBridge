@@ -201,7 +201,43 @@
           "fetchedAt": 1792441200
         }
       ],
-      "errors": []
+      "errors": [],
+      "tempHistory": {
+        "providers": [
+          "om_ecmwf"
+        ],
+        "start": 1792357200,
+        "temps": [
+          17.1,
+          18,
+          19.2,
+          19.9,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          14.6,
+          15.2,
+          16.1,
+          16.4
+        ]
+      }
     },
     {
       "id": "office-id",
@@ -318,7 +354,8 @@
       ],
       "errors": [
         "om_icon: timeout"
-      ]
+      ],
+      "tempHistory": null
     }
   ]
 }

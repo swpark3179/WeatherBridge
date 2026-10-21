@@ -19,13 +19,25 @@ export const OPEN_METEO_MODELS: Record<string, ProviderId> = {
 
 const HOUR = 3600;
 
-export function openMeteoForecastUrl(lat: number, lon: number, days = 7): string {
+/**
+ * 지난 며칠 값도 받는다(기온 비교: 어제~7일 전 같은 시각). 시각은 UTC 날짜 기준이라
+ * 서울(+9시간)의 7일 전 자정부터 채우려면 하루 더 필요하다.
+ */
+export const OPEN_METEO_PAST_DAYS = 8;
+
+export function openMeteoForecastUrl(
+  lat: number,
+  lon: number,
+  days = 7,
+  pastDays = OPEN_METEO_PAST_DAYS,
+): string {
   const params = new URLSearchParams({
     latitude: lat.toFixed(2),
     longitude: lon.toFixed(2),
     hourly: "precipitation_probability,precipitation,temperature_2m",
     models: Object.keys(OPEN_METEO_MODELS).join(","),
     forecast_days: String(days),
+    past_days: String(pastDays),
     timeformat: "unixtime",
     timezone: "GMT",
   });

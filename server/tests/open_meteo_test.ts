@@ -16,6 +16,8 @@ Deno.test("url requests three models in unix time, rounded to ~1km", () => {
   assertEquals(url.searchParams.get("longitude"), "126.98");
   assertEquals(url.searchParams.get("models"), "ecmwf_ifs025,ncep_gfs_seamless,dwd_icon_seamless");
   assertEquals(url.searchParams.get("timeformat"), "unixtime");
+  // 기온 비교용 지난 값: 서울 7일 전 자정부터 채우려면 UTC로 8일
+  assertEquals(url.searchParams.get("past_days"), "8");
 });
 
 Deno.test("preceding-hour values move to the slot that starts an hour earlier", () => {

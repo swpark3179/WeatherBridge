@@ -150,8 +150,10 @@ else
     else
       echo "$BODY" | jq '{threshold, headline: .briefing.state.headline,
         places: [.places[] | {kind, name, maxPop, hours: (.hours | length),
-          sources: [.sources[].provider], errors}]}'
+          sources: [.sources[].provider], errors,
+          tempHistory: (.tempHistory | if . then {providers, hours: (.temps | length)} else null end)}]}'
       [ "$(echo "$BODY" | jq '.places[0].sources | length')" -ge 3 ] || fail "today 소스가 3개 미만"
+      echo "$BODY" | jq -e '.places[0].tempHistory.temps | length > 0' >/dev/null || fail "today에 기온 비교용 기록(tempHistory)이 없습니다"
       echo "$BODY" | jq -e 'tostring | test("37\\.5") | not' >/dev/null || fail "today 응답에 좌표가 있습니다"
     fi
 

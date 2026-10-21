@@ -40,6 +40,18 @@ public struct LocalClock: Sendable {
         calendar.component(.hour, from: Date(timeIntervalSince1970: TimeInterval(epoch)))
     }
 
+    /// 그 날 현지 0시 (epoch 초)
+    public func startOfDay(_ epoch: Int) -> Int {
+        Int(calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(epoch))).timeIntervalSince1970)
+    }
+
+    /// `days`일 뒤(음수면 앞)의 같은 현지 시각. 서머타임이 바뀌는 날도 시계 시각을 맞춘다.
+    public func addingDays(_ days: Int, to epoch: Int) -> Int {
+        let date = Date(timeIntervalSince1970: TimeInterval(epoch))
+        guard let moved = calendar.date(byAdding: .day, value: days, to: date) else { return epoch + days * 86400 }
+        return Int(moved.timeIntervalSince1970)
+    }
+
     /// 0 = 오늘, 1 = 내일 …
     public func dayOffset(_ epoch: Int, from now: Int) -> Int {
         let a = calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(now)))
