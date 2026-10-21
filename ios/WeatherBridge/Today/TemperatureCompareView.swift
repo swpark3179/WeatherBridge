@@ -2,20 +2,33 @@ import Charts
 import SwiftUI
 import WeatherCore
 
+/// 기온 비교 보기: 오늘 시간별, 앞으로 7일 날짜별
+enum TemperatureMode: Hashable {
+    case today, week
+}
+
 /// 기온 비교로 가는 경로
 struct TemperatureRoute: Hashable {
     let placeID: String
+    /// 처음 보여줄 보기 (오늘 화면의 24시간·7일 보기를 따른다)
+    var mode: TemperatureMode = .today
 }
 
-/// 기온 비교: 오늘(0–24시) 시간별 기온을 어제·최근 3일·최근 7일의 같은 시각과 견준다.
-/// 오늘 카드 맨 아래 "지금 어제보다 3° 낮아요" 줄을 누르면 열린다.
+/// 기온 비교: 늘 최근 3일(어제·그제·3일 전)과 견준다.
+/// 오늘 보기는 오늘(0–24시) 시간별 기온을 같은 시각과, 7일 보기는 날짜별 최고·최저를 최근 3일 평균 최고·최저와 견준다.
+/// 오늘 카드 맨 아래 "지금 최근 3일보다 3° 낮아요" 줄을 누르면 열린다.
 struct TemperatureCompareView: View {
     let route: TemperatureRoute
 
     @EnvironmentObject private var model: AppModel
-    @State private var baseline: TemperatureBaseline = .yesterday
+    @State private var mode: TemperatureMode
     /// 고른 시간 (`Hour.t`). nil이면 지금 시간
     @State private var selectedHour: Int?
+
+    init(route: TemperatureRoute) {
+        self.route = route
+        _mode = State(initialValue: route.mode)
+    }
 
     private var place: TodayPlace? {
         model.today?.places.first { $0.id == route.placeID }
@@ -24,22 +37,20 @@ struct TemperatureCompareView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                Picker("비교 기준", selection: $baseline) {
-                    ForEach(TemperatureBaseline.allCases, id: \.self) { baseline in
-                        Text(baseline.label).tag(baseline)
-                    }
+                Picker("보기", selection: $mode) {
+                    Text("오늘").tag(TemperatureMode.today)
+                    Text("7일").tag(TemperatureMode.week)
                 }
                 .pickerStyle(.segmented)
                 if let today = model.today, let place {
                     let now = Int(Date().timeIntervalSince1970)
-                    if let comparison = TemperatureComparisonModel(place: place, tz: today.tz, now: now, baseline: baseline) {
-                        content(comparison, clock: LocalClock(tz: today.tz))
-                    } else {
-                        ContentUnavailableView(
-                            "비교할 지난 기온이 없어요",
-                            systemImage: "thermometer.medium",
-                            description: Text("서버가 지난 기온을 받아 오면 보여 드려요. 잠시 뒤 오늘 화면에서 당겨서 새로고침해 주세요.")
-                        )
+                    switch mode {
+                    case .today:
+                        todayView(place: place, today: today, now: now)
+                            .motionTransition(Self.modeTransition)
+                    case .week:
+                        weekView(place: place, today: today, now: now)
+                            .motionTransition(Self.modeTransition)
                     }
                 } else {
                     ContentUnavailableView(
@@ -50,24 +61,63 @@ struct TemperatureCompareView: View {
                 }
             }
             .padding()
+            .motion(reduced: Motion.fade, value: mode)
+            .motion(Motion.gentle, value: model.today?.generatedAt)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(place.map { "\($0.name) 기온 비교" } ?? "기온 비교")
         .navigationBarTitleDisplayMode(.inline)
-        .sensoryFeedback(.selection, trigger: baseline)
+        .sensoryFeedback(.selection, trigger: mode)
+    }
+
+    /// 보기를 바꾸면 새 보기가 살짝 떠오르며 나타난다 (동작 줄이기면 흐려지기만)
+    private static var modeTransition: AnyTransition {
+        .opacity.combined(with: .offset(y: 12))
     }
 
     @ViewBuilder
-    private func content(_ comparison: TemperatureComparisonModel, clock: LocalClock) -> some View {
+    private func todayView(place: TodayPlace, today: TodayResponse, now: Int) -> some View {
+        if let comparison = TemperatureComparisonModel(place: place, tz: today.tz, now: now) {
+            VStack(spacing: 16) {
+                todayContent(comparison, clock: LocalClock(tz: today.tz))
+            }
+        } else {
+            ContentUnavailableView(
+                "비교할 지난 기온이 없어요",
+                systemImage: "thermometer.medium",
+                description: Text("서버가 지난 기온을 받아 오면 보여 드려요. 잠시 뒤 오늘 화면에서 당겨서 새로고침해 주세요.")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func todayContent(_ comparison: TemperatureComparisonModel, clock: LocalClock) -> some View {
         let focus = comparison.hours.first { $0.t == selectedHour } ?? comparison.current
         TemperatureHero(comparison: comparison, clock: clock)
         HStack(spacing: 8) {
-            ExtremeTile(title: "오늘 최고", extreme: comparison.high, baseline: comparison.baseline)
-            ExtremeTile(title: "오늘 최저", extreme: comparison.low, baseline: comparison.baseline)
+            ExtremeTile(title: "오늘 최고", extreme: comparison.high)
+            ExtremeTile(title: "오늘 최저", extreme: comparison.low)
         }
         TemperatureChart(comparison: comparison, clock: clock, focus: focus, selectedHour: $selectedHour)
         TemperatureHourList(comparison: comparison, focus: focus?.t) { selectedHour = $0 }
         footnote(comparison)
+    }
+
+    @ViewBuilder
+    private func weekView(place: TodayPlace, today: TodayResponse, now: Int) -> some View {
+        if let week = WeekTemperatureModel(place: place, tz: today.tz, now: now) {
+            VStack(spacing: 16) {
+                WeekHero(week: week)
+                WeekRangeList(week: week)
+                weekFootnote(week)
+            }
+        } else {
+            ContentUnavailableView(
+                "7일 기온을 받는 중이에요",
+                systemImage: "calendar",
+                description: Text("서버가 날짜별 기온을 보내면 보여 드려요. 오늘 화면에서 당겨서 새로고침해 주세요.")
+            )
+        }
     }
 
     private func footnote(_ comparison: TemperatureComparisonModel) -> some View {
@@ -76,27 +126,33 @@ struct TemperatureCompareView: View {
         var lines = [
             "\(sources) \(basis) 지난 기온과 오늘 기온을 견줬어요. 지난 시간은 모델이 남긴 값, 남은 시간은 예보예요.",
         ]
-        if comparison.baselineDays < comparison.baseline.days {
+        if comparison.baselineDays < TemperatureComparisonModel.days {
             lines.append("지난 기록이 \(comparison.baselineDays)일치뿐이라 그 날들로만 계산했어요.")
         }
         lines.append("같은 예보끼리 비교한 값이라 오늘 카드의 기온(기상청 우선)과 조금 다를 수 있어요.")
-        return Text(lines.joined(separator: " "))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        return Footnote(text: lines.joined(separator: " "))
+    }
+
+    private func weekFootnote(_ week: WeekTemperatureModel) -> some View {
+        var lines = [
+            "날마다 그 날 끝까지 닿는 예보 모델의 평균이고, 최근 3일 기준도 그 날과 같은 모델로 만들어 모델마다 다른 치우침을 뺐어요. 먼 날일수록 쓸 수 있는 모델이 적어요.",
+        ]
+        if let days = week.baseline?.dayCount, days < TemperatureComparisonModel.days {
+            lines.append("지난 기록이 \(days)일치뿐이라 그 날들로만 계산했어요.")
+        }
+        lines.append("같은 예보끼리 비교한 값이라 오늘 카드의 기온(기상청 우선)과 조금 다를 수 있어요.")
+        return Footnote(text: lines.joined(separator: " "))
     }
 }
 
-extension TemperatureDelta {
-    /// 낮으면 파랑, 높으면 주황, 비슷하면 회색
-    var tint: Color {
-        if isSimilar { return .secondary }
-        return degrees < 0 ? .blue : .orange
-    }
+private struct Footnote: View {
+    let text: String
 
-    var symbolName: String {
-        if isSimilar { return "thermometer.medium" }
-        return degrees < 0 ? "thermometer.low" : "thermometer.high"
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -123,7 +179,7 @@ private struct TemperatureHero: View {
                 }
                 HStack(spacing: 8) {
                     ValueTile(title: "오늘", value: headline.delta.today, tint: headline.delta.tint)
-                    ValueTile(title: comparison.baseline.valueLabel, value: headline.delta.baseline, tint: nil)
+                    ValueTile(title: TemperatureComparisonModel.valueLabel, value: headline.delta.baseline, tint: nil)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -156,6 +212,7 @@ private struct ValueTile: View {
             Text("\(Int(value.rounded()))°")
                 .font(.title2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint ?? Color.primary)
+                .contentTransition(.numericText(value: value.rounded()))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -163,11 +220,10 @@ private struct ValueTile: View {
     }
 }
 
-/// 오늘 최고·최저와 기준 날들의 최고·최저(평균)
+/// 오늘 최고·최저와 최근 3일 최고·최저(평균)
 private struct ExtremeTile: View {
     let title: String
     let extreme: TemperatureComparisonModel.Extreme?
-    let baseline: TemperatureBaseline
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -182,7 +238,7 @@ private struct ExtremeTile: View {
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(extreme.delta.tint)
                 }
-                Text("\(baseline.valueLabel) \(Int(extreme.baseline.rounded()))°")
+                Text("\(TemperatureComparisonModel.valueLabel) \(Int(extreme.baseline.rounded()))°")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -202,7 +258,7 @@ private struct ExtremeTile: View {
 
 // MARK: 오늘 시간별 그래프
 
-/// 오늘 기온(굵은 선)과 기준 날의 같은 시각 기온(점선). 기준이 여러 날이면 그 날들의 최저–최고 띠도 그린다.
+/// 오늘 기온(굵은 선)과 최근 3일 같은 시각 평균(점선). 값이 있는 날이 여럿이면 그 날들의 최저–최고 띠도 그린다.
 /// 밀어서 시간을 고르면 1시간 단위로 붙는다.
 private struct TemperatureChart: View {
     let comparison: TemperatureComparisonModel
@@ -227,7 +283,7 @@ private struct TemperatureChart: View {
                 .frame(height: 200)
             HStack(spacing: 16) {
                 LegendLine(label: "오늘", color: .primary, dash: [])
-                LegendLine(label: comparison.baseline.valueLabel, color: .secondary, dash: [4, 3])
+                LegendLine(label: TemperatureComparisonModel.valueLabel, color: .secondary, dash: [4, 3])
                 if comparison.baselineDays > 1 {
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.25)).frame(width: 14, height: 10)
@@ -336,14 +392,12 @@ private struct TemperatureChart: View {
             }
         }
         .sensoryFeedback(.selection, trigger: selectedHour)
-        .accessibilityLabel("오늘과 \(comparison.baseline.valueLabel)의 시간별 기온 그래프")
+        .accessibilityLabel("오늘과 \(TemperatureComparisonModel.valueLabel)의 시간별 기온 그래프")
     }
 
-    /// "8시 12° · 어제 15°"
+    /// "8시 12° · 최근 3일 15°"
     private func focusText(_ hour: TemperatureComparisonModel.Hour) -> String {
-        let today = hour.today.map { "\(Int($0.rounded()))°" } ?? "–"
-        let baseline = hour.baseline.map { "\(Int($0.rounded()))°" } ?? "–"
-        return "\(hour.hour)시 \(today) · \(comparison.baseline.label) \(baseline)"
+        "\(hour.hour)시 \(degreesText(hour.today)) · \(TemperatureComparisonModel.label) \(degreesText(hour.baseline))"
     }
 
     private var xDomain: ClosedRange<Date> {
@@ -390,7 +444,7 @@ private struct TemperatureHourList: View {
                 Text("시간별")
                     .font(.headline)
                 Spacer()
-                Text("오늘 · \(comparison.baseline.valueLabel) · 차이")
+                Text("오늘 · \(TemperatureComparisonModel.valueLabel) · 차이")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -403,7 +457,7 @@ private struct TemperatureHourList: View {
                 } label: {
                     TemperatureHourRow(
                         hour: hour,
-                        baselineLabel: comparison.baseline.valueLabel,
+                        baselineLabel: TemperatureComparisonModel.valueLabel,
                         isCurrent: hour.t == comparison.current?.t,
                         selected: hour.t == focus
                     )
@@ -430,6 +484,7 @@ private struct TemperatureHourRow: View {
             Text(degreesText(hour.today))
                 .font(.body.weight(.semibold).monospacedDigit())
                 .frame(width: 44, alignment: .trailing)
+                .contentTransition(.numericText())
             Text(degreesText(hour.baseline))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -459,14 +514,146 @@ private struct TemperatureHourRow: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func degreesText(_ value: Double?) -> String {
-        value.map { "\(Int($0.rounded()))°" } ?? "–"
-    }
-
     private var accessibilityText: String {
         let time = isCurrent ? "지금" : "\(hour.hour)시"
         guard let delta = hour.delta else { return "\(time) 오늘 \(degreesText(hour.today)), \(baselineLabel) \(degreesText(hour.baseline))" }
         let difference = delta.isSimilar ? "비슷함" : "\(abs(delta.degrees))도 \(delta.degrees < 0 ? "낮음" : "높음")"
         return "\(time) 오늘 \(degreesText(hour.today)), \(baselineLabel) \(degreesText(hour.baseline)), \(difference)"
+    }
+}
+
+// MARK: 7일 보기
+
+/// 맨 위: 앞으로 7일이 최근 3일보다 어떤지와 눈에 띄는 날, 최근 3일 평균 최고·최저
+private struct WeekHero: View {
+    let week: WeekTemperatureModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("앞으로 \(week.days.count)일 최고·최저", systemImage: week.outlook?.symbolName ?? "calendar")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(week.outlook?.tint ?? Color.secondary)
+                Text(week.headline ?? "최근 3일과 견줄 기록이 아직 없어요")
+                    .font(.title.weight(.semibold))
+                if let detail = week.detail {
+                    Text(detail)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let baseline = week.baseline {
+                HStack(spacing: 8) {
+                    ValueTile(title: "\(TemperatureComparisonModel.valueLabel) 최고", value: baseline.high, tint: nil)
+                    ValueTile(title: "\(TemperatureComparisonModel.valueLabel) 최저", value: baseline.low, tint: nil)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 날짜마다 최저~최고 막대와 최근 3일과의 차이. 회색 눈금은 그 날과 같은 예보로 만든 최근 3일 평균 최저·최고.
+/// 막대는 차례로 자란다.
+private struct WeekRangeList: View {
+    let week: WeekTemperatureModel
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("날짜별 최고·최저")
+                    .font(.headline)
+                Spacer()
+                HStack(spacing: 4) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.7))
+                        .frame(width: 2, height: 10)
+                    Text(TemperatureComparisonModel.valueLabel)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 4)
+            ForEach(Array(week.days.enumerated()), id: \.element.id) { index, day in
+                WeekRangeRow(day: day, scale: week.scale, shown: appeared || reduceMotion)
+                    .animation(
+                        reduceMotion ? nil : .spring(duration: 0.6, bounce: 0.2).delay(Double(index) * 0.05),
+                        value: appeared
+                    )
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .onAppear { appeared = true }
+    }
+}
+
+private struct WeekRangeRow: View {
+    let day: WeekTemperatureModel.Day
+    let scale: ClosedRange<Double>
+    let shown: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(day.label)
+                    .font(.subheadline.weight(.semibold))
+                Text(day.dateText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 40, alignment: .leading)
+            ValueWithDelta(value: day.low, delta: day.outlook.low, emphasized: false)
+                .frame(width: 40, alignment: .trailing)
+            RangeBar(
+                low: day.low,
+                high: day.high,
+                scale: scale,
+                ticks: day.baseline.map { [$0.low, $0.high] } ?? [],
+                shown: shown
+            )
+            ValueWithDelta(value: day.high, delta: day.outlook.high, emphasized: true)
+                .frame(width: 40, alignment: .trailing)
+        }
+        .padding(.horizontal, 4)
+        .frame(minHeight: 48)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        var parts = ["\(day.label) \(day.dateText)", "최고 \(degreesText(day.high)), 최저 \(degreesText(day.low))"]
+        if let headline = day.outlook.headline { parts.append(headline) }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// 기온과 그 아래 최근 3일과의 차이("−3°")
+private struct ValueWithDelta: View {
+    let value: Double?
+    let delta: TemperatureDelta?
+    /// 최고는 진하게, 최저는 옅게
+    let emphasized: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(degreesText(value))
+                .font(.subheadline.weight(emphasized ? .semibold : .regular).monospacedDigit())
+                .foregroundStyle(emphasized ? Color.primary : Color.secondary)
+                .contentTransition(.numericText())
+            if let delta {
+                Text(delta.signedText)
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(delta.tint)
+                    .contentTransition(.numericText())
+            }
+        }
     }
 }

@@ -8,6 +8,7 @@ import {
   dailyRain,
   type LoadedPlace,
   loadForecasts,
+  recentTemps,
   tempHistory,
 } from "../supabase/functions/_shared/today.ts";
 import { kst, openMeteoBody, routedFetch } from "./fixtures.ts";
@@ -260,17 +261,108 @@ Deno.test("today response carries the temperature history per place", () => {
   assertEquals(home.temps.slice(24), [14.6, 15.2, 16.1, 16.4]);
   // 회사는 Open-Meteo 기온이 없다
   assertEquals(r.places[1].tempHistory, null);
+  // 7일 보기 기준: 지난 기온이 있는 모델(ECMWF)만, 오늘은 빼고
+  assertEquals(r.places[0].recentTemps, [
+    { providers: ["om_ecmwf"], start: T0 - 24 * H, temps: [17.1, 18, 19.2, 19.9] },
+  ]);
+  assertEquals(r.places[1].recentTemps, []);
+});
+
+/** 모델마다 조금씩 다른 치우침: 모델끼리 섞지 않아야 앱이 같은 모델로 기준을 만들 수 있다 */
+const BIAS: Partial<Record<ProviderId, number>> = { om_ecmwf: 0, om_gfs: 1, om_icon: -0.6 };
+const WIDE = [kst(2026, 10, 11, 0), kst(2026, 10, 30, 0)] as const;
+const hourly = (t: number) => 10 + ((t - T0) / H) * 0.1;
+
+Deno.test("recent temperatures carry the last three local days per Open-Meteo model", () => {
+  const recent = recentTemps([
+    tempSeries("kma_short", ...WIDE, () => 30),
+    ...(["om_ecmwf", "om_gfs", "om_icon"] as const).map((p) =>
+      tempSeries(p, ...WIDE, (t) => Math.round((hourly(t) + BIAS[p]!) * 10) / 10)
+    ),
+  ], { nowSec: NOW, tz: "Asia/Seoul" });
+
+  // 기상청은 지난 시간이 없어 빠지고, 모델끼리 평균하지 않는다
+  assertEquals(recent.map((h) => h.providers), [["om_ecmwf"], ["om_gfs"], ["om_icon"]]);
+  for (const h of recent) {
+    // 3일 전(10/17) 0시부터 어제 자정까지: 오늘은 들어가지 않는다
+    assertEquals(h.start, kst(2026, 10, 17, 0));
+    assertEquals(h.temps.length, 3 * 24);
+  }
+  const at = (i: number, t: number) => recent[i].temps[(t - recent[i].start) / H];
+  const yesterdayNoon = kst(2026, 10, 19, 12);
+  assertEquals(at(0, yesterdayNoon), 8.2);
+  assertEquals(at(1, yesterdayNoon), 9.2);
+  assertEquals(at(2, yesterdayNoon), 7.6);
+});
+
+Deno.test("recent temperatures leave out models without past values", () => {
+  const recent = recentTemps([
+    tempSeries("om_ecmwf", ...WIDE, () => 10),
+    // GFS는 오늘 값만 있다
+    tempSeries("om_gfs", kst(2026, 10, 20, 0), WIDE[1], () => 11),
+  ], { nowSec: NOW, tz: "Asia/Seoul" });
+  assertEquals(recent.map((h) => h.providers), [["om_ecmwf"]]);
+  assertEquals(
+    recentTemps([tempSeries("kma_short", ...WIDE, () => 15)], { nowSec: NOW, tz: "Asia/Seoul" }),
+    [],
+  );
+});
+
+Deno.test("daily temps use the models that reach each day's end", () => {
+  const days = dailyRain([
+    tempSeries("om_ecmwf", ...WIDE, (t) => hourly(t)),
+    tempSeries("om_gfs", ...WIDE, (t) => hourly(t) + 1),
+    // ICON은 10/25(5일째) 06시에 끝난다 → 그 날부터는 ECMWF·GFS만
+    tempSeries("om_icon", WIDE[0], kst(2026, 10, 25, 7), (t) => hourly(t) - 0.6),
+  ], { nowSec: NOW, tz: "Asia/Seoul", threshold: 30 });
+
+  assertEquals(days.length, 7);
+  assertEquals(
+    days.map((d) => d.temps?.providers),
+    [
+      ...Array(5).fill(["om_ecmwf", "om_gfs", "om_icon"]),
+      ["om_ecmwf", "om_gfs"],
+      ["om_ecmwf", "om_gfs"],
+    ],
+  );
+  // 오늘도 0시부터 하루 전체 (지난 시간은 모델이 남긴 값)
+  const today = days[0].temps!;
+  assertEquals(today.start, kst(2026, 10, 20, 0));
+  assertEquals(today.temps.length, 24);
+  // 오늘 06시: (10 + 11 + 9.4) / 3
+  assertEquals(today.temps[6], 10.1);
+  assertEquals(days[6].temps!.start, kst(2026, 10, 26, 0));
+});
+
+Deno.test("a day no model's temperatures reach keeps its rain without temps", () => {
+  const days = dailyRain([
+    tempSeries("om_ecmwf", ...WIDE, (t) => (t < kst(2026, 10, 22, 12) ? 10 : null)),
+  ], { nowSec: NOW, tz: "Asia/Seoul", threshold: 30 });
+  assertEquals(days.length, 7);
+  assertEquals(days.map((d) => d.temps !== null), [true, true, false, false, false, false, false]);
+  assertEquals(days[2].pop, 0);
+});
+
+Deno.test("daily temps follow local days across a DST change", () => {
+  // 뉴욕 10/30 10시(EDT). 11/1에 서머타임이 끝나 그 날은 25시간이다.
+  const now = Date.UTC(2026, 9, 30, 14) / 1000;
+  const series = tempSeries("om_ecmwf", now - 3 * 24 * H, now + 9 * 24 * H, () => 12);
+  const days = dailyRain([series], { nowSec: now, tz: "America/New_York", threshold: 30 });
+  assertEquals(days[2].temps?.start, Date.UTC(2026, 10, 1, 4) / 1000);
+  assertEquals(days[2].temps?.temps.length, 25);
+  assertEquals(days[3].temps?.temps.length, 24);
 });
 
 Deno.test("today response carries the daily rain per place", () => {
   const r = buildToday(sample(), { nowSec: NOW, tz: "Asia/Seoul", threshold: 30, horizonHours: 4 });
   assertEquals(r.places[0].days, [
     // 오늘: 계열 최고 70·90·60·50 → (70×1.5 + 90 + 60 + 50) / 4.5
-    { date: kst(2026, 10, 20, 0), pop: 68, agreeing: 4, total: 4, rainy: true },
+    // 기온은 하루 끝까지 닿는 모델이 없어 비어 있다 (ECMWF 기온은 오늘 09시까지)
+    { date: kst(2026, 10, 20, 0), pop: 68, agreeing: 4, total: 4, rainy: true, temps: null },
     // 내일: 30·20·10·0 → 17%, 기준 이상은 기상청 하나
-    { date: kst(2026, 10, 21, 0), pop: 17, agreeing: 1, total: 4, rainy: false },
+    { date: kst(2026, 10, 21, 0), pop: 17, agreeing: 1, total: 4, rainy: false, temps: null },
     // 모레: 기상청(정오에 끝남)의 80%는 빼고 40·70·20
-    { date: kst(2026, 10, 22, 0), pop: 43, agreeing: 2, total: 3, rainy: true },
+    { date: kst(2026, 10, 22, 0), pop: 43, agreeing: 2, total: 3, rainy: true, temps: null },
   ]);
   assertEquals(r.places[1].days, []);
   // 날짜별 값은 시간별 범위(horizonHours)와 따로 계산한다

@@ -32,6 +32,9 @@ import Testing
 
         #expect(home.tempHistory?.providers == ["om_ecmwf"])
         #expect(home.tempHistory?.temps.count == 28)
+        // 7일 기온 비교 기준: 모델마다 하나씩, 오늘은 빼고
+        #expect(home.recentTemps?.map(\.providers) == [["om_ecmwf"]])
+        #expect(home.recentTemps?.first?.temps == [17.1, 18, 19.2, 19.9])
 
         // 7일 보기: 10/20–10/22 (모레는 기상청이 정오에 끝나 3개 예보만)
         let days = try #require(home.days)
@@ -40,12 +43,15 @@ import Testing
         #expect(days.map(\.total) == [4, 4, 3])
         #expect(zip(days.dropFirst(), days).allSatisfy { $0.date - $1.date == 86400 })
         #expect(days[0].level == .high)
+        // 샘플의 기온은 하루 끝까지 닿지 않아 날짜별 기온이 없다
+        #expect(days.allSatisfy { $0.temps == nil })
 
         let office = today.places[1]
         #expect(!office.highlight)
         #expect(office.errors == ["om_icon: timeout"])
         #expect(office.hours[0].families["dwd"] == nil)
         #expect(office.tempHistory == nil)
+        #expect(office.recentTemps == [])
         #expect(office.days == [])
     }
 
@@ -59,6 +65,28 @@ import Testing
         #expect(!String(decoding: data, as: UTF8.self).contains("tempHistory"))
         let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
         #expect(decoded.places.allSatisfy { $0.tempHistory == nil })
+    }
+
+    /// 7일 기온 비교 이전 서버의 응답(또는 저장해 둔 응답)에는 recentTemps와 날짜별 temps가 없다
+    @Test func decodesResponsesWithoutWeekTemperatures() throws {
+        var today = try loadFixture()
+        for index in today.places.indices {
+            today.places[index].tempHistory = nil
+            today.places[index].recentTemps = nil
+            today.places[index].days = today.places[index].days?.map { day in
+                var day = day
+                day.temps = nil
+                return day
+            }
+        }
+        let data = try JSONEncoder().encode(today)
+        #expect(!String(decoding: data, as: UTF8.self).contains("temps"))
+        #expect(!String(decoding: data, as: UTF8.self).contains("recentTemps"))
+        let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
+        #expect(decoded.places.allSatisfy { $0.recentTemps == nil })
+        #expect(decoded.places[0].days?.count == 3)
+        #expect(decoded.places[0].days?.allSatisfy { $0.temps == nil } == true)
+        #expect(WeekTemperatureModel(place: decoded.places[0], tz: decoded.tz, now: decoded.generatedAt) == nil)
     }
 
     /// 7일 보기 이전 서버의 응답(또는 저장해 둔 응답)에는 days가 없다

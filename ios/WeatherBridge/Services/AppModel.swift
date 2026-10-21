@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
     private var registrationFailed = false
     /// 여행을 받는 중에 저장·삭제가 있었으면 끝나고 한 번 더 받는다
     private var tripsReloadPending = false
+    /// 오늘 예보를 받는 중에 다시 받으라는 요청이 왔다 (장소를 바꾼 직후 등)
+    private var todayReloadPending = false
 
     init(bundle: Bundle = .main) {
         let info = bundle.infoDictionary ?? [:]
@@ -177,20 +179,29 @@ final class AppModel: ObservableObject {
     }
 
     func refreshToday() async {
-        guard let api, !isRefreshing else { return }
+        guard let api else { return }
+        // 받는 중이면 끝난 뒤 한 번 더 받는다. 버리면 장소를 바꾼 직후 예전 장소의 예보가 남는다.
+        if isRefreshing {
+            todayReloadPending = true
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
-        do {
-            let fresh = try await api.today()
-            today = fresh
-            todayIsCached = false
-            todayError = nil
-            ResponseCache.today.save(fresh)
-        } catch SupabaseError.noPlaces {
-            phase = .onboarding
-        } catch {
-            todayError = Self.describe(error)
-        }
+        repeat {
+            todayReloadPending = false
+            do {
+                let fresh = try await api.today()
+                today = fresh
+                todayIsCached = false
+                todayError = nil
+                ResponseCache.today.save(fresh)
+            } catch SupabaseError.noPlaces {
+                phase = .onboarding
+                return
+            } catch {
+                todayError = Self.describe(error)
+            }
+        } while todayReloadPending
     }
 
     // MARK: 여행

@@ -44,13 +44,16 @@ public struct TodayPlace: Codable, Hashable, Sendable, Identifiable {
     public var errors: [String]
     /// 기온 비교용 지난 며칠 ~ 오늘의 시간별 기온. 지난 값을 주는 소스가 없거나 이전 서버면 nil
     public var tempHistory: TemperatureHistory?
-    /// 7일 보기: 오늘부터 날짜별 비 소식(쓸 예보가 없는 날은 빠짐). 이전 서버의 응답이면 nil
+    /// 최근 3일(어제 ~ 3일 전)의 시간별 기온, 예보 모델마다 하나씩(`providers`에 그 모델 하나).
+    /// 7일 보기가 날마다 그 날과 같은 모델로 기준을 만든다. 이전 서버의 응답이면 nil
+    public var recentTemps: [TemperatureHistory]?
+    /// 7일 보기: 오늘부터 날짜별 비 소식과 하루 기온(쓸 예보가 없는 날은 빠짐). 이전 서버의 응답이면 nil
     public var days: [TodayDay]?
 }
 
-/// 하루 비 소식. 시간대 없이 그 날 비가 오는지만 본다.
+/// 하루 비 소식과 기온. 비 소식은 시간대 없이 그 날 비가 오는지만 본다.
 public struct TodayDay: Codable, Hashable, Sendable {
-    /// 현지 날짜의 0시 (epoch 초). 오늘은 응답 시각이 속한 시간부터 계산한 값이다
+    /// 현지 날짜의 0시 (epoch 초). 비 소식은 오늘이면 응답 시각이 속한 시간부터 계산한 값이다
     public var date: Int
     /// 예보(계열)마다 그 날 가장 높은 강수확률을 가중 평균한 값
     public var pop: Int
@@ -59,11 +62,14 @@ public struct TodayDay: Codable, Hashable, Sendable {
     public var total: Int
     /// 비 예상 날 (시간별 강조와 같은 규칙)
     public var rainy: Bool
+    /// 그 날 0–24시 시간별 기온: 그 날 끝까지 닿는 예보 모델의 평균(`providers`에 쓴 모델).
+    /// 닿는 모델이 없거나 이전 서버의 응답이면 nil
+    public var temps: TemperatureHistory?
 
     public var level: RainLevel { RainLevel(pop: pop) }
 }
 
-/// 7일 전 현지 자정부터 오늘 자정까지의 시간별 기온 (앞뒤 빈 시간은 서버가 잘라 낸다).
+/// 시간별 기온 (앞뒤 빈 시간은 서버가 잘라 낸다). 기온 비교용 기록은 7일 전 현지 자정부터 오늘 자정까지다.
 /// 모든 시간이 같은 예보 묶음의 평균이라, 날짜끼리 빼면 예보마다 다른 치우침이 빠진다.
 public struct TemperatureHistory: Codable, Hashable, Sendable {
     /// 평균에 쓴 소스: "om_ecmwf", "om_gfs", "om_icon"

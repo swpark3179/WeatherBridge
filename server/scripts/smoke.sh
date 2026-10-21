@@ -155,11 +155,15 @@ else
         places: [.places[] | {kind, name, maxPop, hours: (.hours | length),
           sources: [.sources[].provider], errors,
           tempHistory: (.tempHistory | if . then {providers, hours: (.temps | length)} else null end),
-          days: [(.days // [])[] | "\(.pop)%\(if .rainy then "☔" else "" end)"]}]}'
+          recentTemps: [(.recentTemps // [])[] | "\(.providers[0]) \(.temps | length)h"],
+          days: [(.days // [])[] | "\(.pop)%\(if .rainy then "☔" else "" end) \(.temps.providers // [] | length)모델"]}]}'
       [ "$(echo "$BODY" | jq '.places[0].sources | length')" -ge 3 ] || fail "today 소스가 3개 미만"
       echo "$BODY" | jq -e '.places[0].tempHistory.temps | length > 0' >/dev/null || fail "today에 기온 비교용 기록(tempHistory)이 없습니다"
       echo "$BODY" | jq -e '.places[0].days | length > 0' >/dev/null || fail "today에 7일 보기용 날짜별 비 소식(days)이 없습니다"
-      echo "$BODY" | jq -e 'tostring | test("37\\.5") | not' >/dev/null || fail "today 응답에 좌표가 있습니다"
+      echo "$BODY" | jq -e '.places[0].recentTemps | length > 0' >/dev/null || fail "today에 7일 기온 비교용 최근 기온(recentTemps)이 없습니다"
+      echo "$BODY" | jq -e 'any(.places[0].days[]; .temps != null)' >/dev/null || fail "today의 날짜별 기온(days[].temps)이 모두 비어 있습니다"
+      # 좌표 키가 없는지 본다 (값으로 찾으면 37.5° 같은 기온이 걸린다)
+      echo "$BODY" | jq -e '[paths | .[-1] | strings | select(test("^(lat|lon)"))] | length == 0' >/dev/null || fail "today 응답에 좌표가 있습니다"
     fi
 
     call GET "dispatch?dry_run=1&user_id=${USER_ID}"
@@ -195,7 +199,7 @@ else
           fail "trips: 여행 날짜마다 목적지 기온이 있어야 합니다"
         echo "$BODY" | jq -e 'any(.trips[0].days[]; .destination.cloud != null)' >/dev/null || warn "trips: 목적지 운량이 없습니다"
         echo "$BODY" | jq -e '.home.recent | length > 0' >/dev/null || fail "trips: 집의 지난 기온(home.recent)이 없습니다"
-        echo "$BODY" | jq -e 'tostring | test("139\\.7|37\\.5") | not' >/dev/null || fail "trips 응답에 좌표가 있습니다"
+        echo "$BODY" | jq -e '[paths | .[-1] | strings | select(test("^(lat|lon)"))] | length == 0' >/dev/null || fail "trips 응답에 좌표가 있습니다"
       fi
       app POST "${ROOT}/rest/v1/rpc/delete_trip" "{\"p_id\":\"${TRIP_ID}\"}"
       [[ "$STATUS" == 20[04] ]] && echo "여행 삭제" || fail "delete_trip HTTP $STATUS: $BODY"

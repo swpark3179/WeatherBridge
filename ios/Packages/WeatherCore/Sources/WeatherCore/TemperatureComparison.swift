@@ -1,29 +1,5 @@
 import Foundation
 
-/// 기온 비교 기준: 어제, 최근 3일, 최근 7일의 같은 시각
-public enum TemperatureBaseline: Int, CaseIterable, Hashable, Sendable {
-    case yesterday = 1
-    case threeDays = 3
-    case week = 7
-
-    /// 견줄 지난 날 수
-    public var days: Int { rawValue }
-
-    /// "어제", "최근 3일", "최근 7일"
-    public var label: String {
-        switch self {
-        case .yesterday: "어제"
-        case .threeDays: "최근 3일"
-        case .week: "최근 7일"
-        }
-    }
-
-    /// 값 옆에 붙이는 이름: "어제", "최근 3일 평균"
-    public var valueLabel: String {
-        self == .yesterday ? label : "\(label) 평균"
-    }
-}
-
 /// 오늘 기온 − 기준 기온. 차이는 화면에 보이는 정수 기온끼리 빼서 숫자와 문장이 어긋나지 않게 한다.
 public struct TemperatureDelta: Hashable, Sendable {
     public let today: Double
@@ -49,12 +25,7 @@ public struct TemperatureDelta: Hashable, Sendable {
         }
     }
 
-    /// "어제보다 3° 낮아요", "최근 7일 평균보다 2° 높아요", "어제와 비슷해요"
-    public func sentence(_ baseline: TemperatureBaseline) -> String {
-        sentence(comparedTo: baseline.valueLabel)
-    }
-
-    /// "지금보다 3° 낮아요", "지금과 비슷해요". 와/과는 `label`의 끝소리로 고른다.
+    /// "최근 3일보다 3° 낮아요", "지금과 비슷해요". 와/과는 `label`의 끝소리로 고른다.
     public func sentence(comparedTo label: String) -> String {
         if isSimilar {
             return "\(Hangul.withAnd(label)) 비슷해요"
@@ -77,9 +48,16 @@ public struct TemperatureDelta: Hashable, Sendable {
     }
 }
 
-/// 기온 비교 화면: 오늘(현지 0–24시) 시간별 기온과 기준 날들의 같은 시각 기온.
-/// 지난 시간은 예보 모델의 지난 값, 남은 시간은 예보다.
+/// 기온 비교 화면의 오늘 보기: 오늘(현지 0–24시) 시간별 기온과 최근 3일(어제·그제·3일 전)의 같은 시각 기온.
+/// 지난 시간은 예보 모델의 지난 값, 남은 시간은 예보다. 기준 날 수는 여행 탭의 "지금"과 같다.
 public struct TemperatureComparisonModel: Sendable, Equatable {
+    /// 견줄 지난 날 수
+    public static let days = HomeBaseline.days
+    /// 문장에 쓰는 기준 이름: "최근 3일보다 3° 낮아요"
+    public static let label = "최근 \(days)일"
+    /// 값 옆에 붙이는 기준 이름
+    public static let valueLabel = "최근 \(days)일 평균"
+
     public struct Hour: Sendable, Equatable {
         public let t: Int
         /// 현지 시(0–23)
@@ -87,7 +65,7 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
         public let today: Double?
         /// 기준 날들의 같은 시각 평균
         public let baseline: Double?
-        /// 기준 날들의 같은 시각 최저·최고 (기준이 하루면 평균과 같다)
+        /// 기준 날들의 같은 시각 최저·최고 (값이 있는 기준 날이 하루면 평균과 같다)
         public let low: Double?
         public let high: Double?
 
@@ -100,7 +78,7 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
     /// 하루 최고 또는 최저 기온 비교
     public struct Extreme: Sendable, Equatable {
         public let today: Double
-        /// 기준 날마다 구한 최고(최저)의 평균
+        /// 기준 날마다 구한 최고(최저)의 평균 (`daily`)
         public let baseline: Double
 
         public var delta: TemperatureDelta { TemperatureDelta(today: today, baseline: baseline) }
@@ -111,18 +89,19 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
         /// "지금" 또는 "최고 기온"
         public let subject: String
         public let delta: TemperatureDelta
-        /// "어제보다 3° 낮아요"
+        /// "최근 3일보다 3° 낮아요"
         public let text: String
     }
 
-    public let baseline: TemperatureBaseline
     /// 오늘 현지 0시부터 1시간 간격
     public let hours: [Hour]
     /// 지금 시각이 속한 시간
     public let current: Hour?
     public let high: Extreme?
     public let low: Extreme?
-    /// 값이 있는 기준 날 수. 지난 기록이 모자라면 `baseline.days`보다 적다
+    /// 최근 3일 하루 최고·최저의 평균. 7일 보기의 기준과 같은 값이다
+    public let daily: HomeBaseline?
+    /// 같은 시각 값이 있는 기준 날 수. 지난 기록이 모자라면 `days`보다 적다
     public let baselineDays: Int
     /// 평균에 쓴 소스
     public let providers: [String]
@@ -131,14 +110,14 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
     public let headline: Headline?
 
     /// 지난 기온이 없거나, 오늘과 기준 날을 견줄 수 있는 시간이 하나도 없으면 nil
-    public init?(place: TodayPlace, tz: String, now: Int, baseline: TemperatureBaseline) {
+    public init?(place: TodayPlace, tz: String, now: Int) {
         guard let history = place.tempHistory else { return nil }
         let clock = LocalClock(tz: tz)
         let dayStart = clock.startOfDay(now)
         let dayEnd = clock.addingDays(1, to: dayStart)
         let times = DayTemperature.hours(from: dayStart, to: dayEnd)
         // 기준 날마다, 오늘 각 시간과 같은 시계 시각의 기온
-        let past = (1...baseline.days).map { day in
+        let past = (1...Self.days).map { day in
             times.map { history.temp(at: clock.addingDays(-day, to: $0)) }
         }
         let hours = times.enumerated().map { index, t in
@@ -154,30 +133,30 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
         }
         guard hours.contains(where: { $0.delta != nil }) else { return nil }
 
-        func extreme(_ pick: ([Double]) -> Double?) -> Extreme? {
-            guard let value = DayTemperature.extreme(hours.map(\.today), hours: times.count, pick) else {
-                return nil
-            }
-            let perDay = past.compactMap { DayTemperature.extreme($0, hours: times.count, pick) }
-            guard !perDay.isEmpty else { return nil }
-            return Extreme(today: value, baseline: perDay.reduce(0, +) / Double(perDay.count))
+        // 기준은 지난 날마다 그 날 하루(서머타임이면 23·25시간)의 최고·최저를 구해 평균한다
+        let daily = HomeBaseline(history: history, tz: tz, now: now)
+        func extreme(_ pick: ([Double]) -> Double?, baseline: Double?) -> Extreme? {
+            guard let baseline,
+                  let value = DayTemperature.extreme(hours.map(\.today), hours: times.count, pick)
+            else { return nil }
+            return Extreme(today: value, baseline: baseline)
         }
         let current = hours.first { $0.t <= now && now < $0.t + 3600 }
-        let high = extreme { $0.max() }
+        let high = extreme({ $0.max() }, baseline: daily?.high)
         let values = hours.flatMap { [$0.today, $0.low, $0.high].compactMap { $0 } }
 
-        self.baseline = baseline
         self.hours = hours
         self.current = current
         self.high = high
-        low = extreme { $0.min() }
+        low = extreme({ $0.min() }, baseline: daily?.low)
+        self.daily = daily
         baselineDays = past.filter { day in day.contains { $0 != nil } }.count
         providers = history.providers
         valueRange = ((values.min() ?? 0) - 1).rounded(.down)...((values.max() ?? 0) + 1).rounded(.up)
         if let delta = current?.delta {
-            headline = Headline(subject: "지금", delta: delta, text: delta.sentence(baseline))
+            headline = Headline(subject: "지금", delta: delta, text: delta.sentence(comparedTo: Self.label))
         } else if let high {
-            headline = Headline(subject: "최고 기온", delta: high.delta, text: high.delta.sentence(baseline))
+            headline = Headline(subject: "최고 기온", delta: high.delta, text: high.delta.sentence(comparedTo: Self.label))
         } else {
             headline = nil
         }

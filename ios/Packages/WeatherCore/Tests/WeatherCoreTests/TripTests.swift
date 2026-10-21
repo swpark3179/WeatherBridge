@@ -111,6 +111,13 @@ import Testing
         #expect(outlook.headline == text)
     }
 
+    @Test func outlookNamesItsBaseline() {
+        let label = TemperatureComparisonModel.label
+        #expect(TemperatureOutlook(high: TemperatureDelta(today: 16.1, baseline: 20.1), low: TemperatureDelta(today: 7.1, baseline: 10.1), label: label).headline == "최근 3일보다 조금 추워요")
+        #expect(TemperatureOutlook(high: TemperatureDelta(today: 20.4, baseline: 20), low: nil, label: label).headline == "최근 3일과 비슷해요")
+        #expect(TemperatureOutlook(high: TemperatureDelta(today: 24, baseline: 20), low: TemperatureDelta(today: 7, baseline: 10), label: label).headline == "최근 3일보다 일교차가 커요")
+    }
+
     @Test func outlookWithOneSideOrNone() {
         #expect(TemperatureOutlook(high: nil, low: nil).headline == nil)
         #expect(TemperatureOutlook(high: nil, low: nil).trend == nil)
@@ -174,6 +181,16 @@ import Testing
         #expect(baseline.low == 12)
     }
 
+    @Test func homeBaselineFromAMixedHistoryMatchesOneModel() throws {
+        let home = try #require(try tripsFixture().home)
+        for history in home.recent {
+            let fromHistory = try #require(HomeBaseline(history: history, tz: home.tz, now: tripsNow))
+            let fromRecent = try #require(HomeBaseline(recent: [history], tz: home.tz, now: tripsNow))
+            #expect(fromHistory == fromRecent)
+        }
+        #expect(HomeBaseline(history: TemperatureHistory(providers: ["om_ecmwf"], start: 0, temps: []), tz: home.tz, now: tripsNow) == nil)
+    }
+
     @Test func homeBaselineHandlesA25HourDay() throws {
         // 뉴욕 11/1은 서머타임이 끝나 25시간
         let tz = "America/New_York"
@@ -184,8 +201,10 @@ import Testing
         let hours = (end - start) / 3600
         #expect(hours == 73)
         let temps = (0..<hours).map { i -> Double? in Double(i % 24) }
-        let baseline = try #require(HomeBaseline(recent: [TemperatureHistory(providers: ["om_gfs"], start: start, temps: temps)], tz: tz, now: now))
+        let history = TemperatureHistory(providers: ["om_gfs"], start: start, temps: temps)
+        let baseline = try #require(HomeBaseline(recent: [history], tz: tz, now: now))
         #expect(baseline.dayCount == 3)
+        #expect(HomeBaseline(history: history, tz: tz, now: now) == baseline)
     }
 
     @Test func modelsDescribeStatusPeriodAndComparison() throws {

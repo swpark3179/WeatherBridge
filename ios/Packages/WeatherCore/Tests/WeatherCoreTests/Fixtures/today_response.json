@@ -238,27 +238,44 @@
           16.4
         ]
       },
+      "recentTemps": [
+        {
+          "providers": [
+            "om_ecmwf"
+          ],
+          "start": 1792357200,
+          "temps": [
+            17.1,
+            18,
+            19.2,
+            19.9
+          ]
+        }
+      ],
       "days": [
         {
           "date": 1792422000,
           "pop": 68,
           "agreeing": 4,
           "total": 4,
-          "rainy": true
+          "rainy": true,
+          "temps": null
         },
         {
           "date": 1792508400,
           "pop": 17,
           "agreeing": 1,
           "total": 4,
-          "rainy": false
+          "rainy": false,
+          "temps": null
         },
         {
           "date": 1792594800,
           "pop": 43,
           "agreeing": 2,
           "total": 3,
-          "rainy": true
+          "rainy": true,
+          "temps": null
         }
       ]
     },
@@ -379,6 +396,7 @@
         "om_icon: timeout"
       ],
       "tempHistory": null,
+      "recentTemps": [],
       "days": []
     }
   ]

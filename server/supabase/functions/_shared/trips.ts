@@ -26,7 +26,14 @@ import {
   parseLocalDate,
   zonedEpoch,
 } from "./schedule.ts";
-import { meanTempSeries, OPEN_METEO_PROVIDERS, type TempHistory, tempHistory } from "./today.ts";
+import {
+  coveringDay,
+  type ModelReach,
+  OPEN_METEO_PROVIDERS,
+  openMeteoReach,
+  type TempHistory,
+  tempHistory,
+} from "./today.ts";
 
 /** 하늘 상태에 쓰는 낮 시간 (현지 시, 끝 제외) */
 export const DAYTIME_HOURS = { from: 8, to: 20 } as const;
@@ -100,24 +107,16 @@ function phaseOf(trip: Trip, nowSec: number): Phase {
 
 const PHASE_ORDER: Record<Phase, number> = { ongoing: 0, upcoming: 1, ended: 2 };
 
-/** 기온이 닿는 마지막 시각. 모델마다 한 번만 구한다. */
-function tempReach(f: ProviderForecast): number {
-  let reach = -Infinity;
-  for (const s of f.slots) if (s.temp !== null && s.t > reach) reach = s.t;
-  return reach;
-}
-
 /** 한 장소의 예보로 날짜별 하루 날씨를 만든다. 같은 날짜는 한 번만 계산한다. */
 export class DayWeatherBuilder {
-  private readonly models: Array<{ forecast: ProviderForecast; reach: number }>;
+  private readonly models: ModelReach[];
   private readonly memo = new Map<string, TripDayWeather>();
 
   constructor(
     private readonly forecasts: ProviderForecast[],
     private readonly opts: { tz: string; nowSec: number; threshold: number },
   ) {
-    this.models = forecasts.filter((f) => OPEN_METEO_PROVIDERS.has(f.provider))
-      .map((forecast) => ({ forecast, reach: tempReach(forecast) }));
+    this.models = openMeteoReach(forecasts);
   }
 
   day(date: string): TripDayWeather {
@@ -144,8 +143,7 @@ export class DayWeatherBuilder {
     }
 
     // 그 날 마지막 정시까지 기온이 있는 모델만 (먼 날일수록 줄어든다)
-    const lastHour = Math.floor((end - 1) / 3600) * 3600;
-    const covering = this.models.filter((m) => m.reach >= lastHour).map((m) => m.forecast);
+    const { covering, temps } = coveringDay(this.models, { from: start, to: end });
     const hours: number[] = [];
     for (let t = Math.ceil(start / 3600) * 3600; t < end; t += 3600) hours.push(t);
 
@@ -154,7 +152,7 @@ export class DayWeatherBuilder {
       rain,
       cloud: daytimeCloud(covering, hours, start),
       snowCm: dailySnow(covering, hours),
-      temps: covering.length > 0 ? meanTempSeries(covering, { from: start, to: end }) : null,
+      temps,
     };
   }
 }
