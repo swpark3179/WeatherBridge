@@ -237,7 +237,30 @@
           16.1,
           16.4
         ]
-      }
+      },
+      "days": [
+        {
+          "date": 1792422000,
+          "pop": 68,
+          "agreeing": 4,
+          "total": 4,
+          "rainy": true
+        },
+        {
+          "date": 1792508400,
+          "pop": 17,
+          "agreeing": 1,
+          "total": 4,
+          "rainy": false
+        },
+        {
+          "date": 1792594800,
+          "pop": 43,
+          "agreeing": 2,
+          "total": 3,
+          "rainy": true
+        }
+      ]
     },
     {
       "id": "office-id",
@@ -355,7 +378,8 @@
       "errors": [
         "om_icon: timeout"
       ],
-      "tempHistory": null
+      "tempHistory": null,
+      "days": []
     }
   ]
 }

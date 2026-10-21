@@ -33,11 +33,20 @@ import Testing
         #expect(home.tempHistory?.providers == ["om_ecmwf"])
         #expect(home.tempHistory?.temps.count == 28)
 
+        // 7일 보기: 10/20–10/22 (모레는 기상청이 정오에 끝나 3개 예보만)
+        let days = try #require(home.days)
+        #expect(days.map(\.pop) == [68, 17, 43])
+        #expect(days.map(\.rainy) == [true, false, true])
+        #expect(days.map(\.total) == [4, 4, 3])
+        #expect(zip(days.dropFirst(), days).allSatisfy { $0.date - $1.date == 86400 })
+        #expect(days[0].level == .high)
+
         let office = today.places[1]
         #expect(!office.highlight)
         #expect(office.errors == ["om_icon: timeout"])
         #expect(office.hours[0].families["dwd"] == nil)
         #expect(office.tempHistory == nil)
+        #expect(office.days == [])
     }
 
     /// 기온 비교 이전 서버의 응답(또는 저장해 둔 응답)에는 tempHistory가 없다
@@ -50,6 +59,18 @@ import Testing
         #expect(!String(decoding: data, as: UTF8.self).contains("tempHistory"))
         let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
         #expect(decoded.places.allSatisfy { $0.tempHistory == nil })
+    }
+
+    /// 7일 보기 이전 서버의 응답(또는 저장해 둔 응답)에는 days가 없다
+    @Test func decodesResponsesWithoutDays() throws {
+        var today = try loadFixture()
+        for index in today.places.indices {
+            today.places[index].days = nil
+        }
+        let data = try JSONEncoder().encode(today)
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"days\""))
+        let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
+        #expect(decoded.places.allSatisfy { $0.days == nil })
     }
 
     @Test func briefingMatchesLiveActivityState() throws {

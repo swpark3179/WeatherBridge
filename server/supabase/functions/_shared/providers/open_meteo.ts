@@ -25,10 +25,16 @@ const HOUR = 3600;
  */
 export const OPEN_METEO_PAST_DAYS = 8;
 
+/**
+ * 앞으로 받을 날 수. 7일 보기(오늘 ~ 6일 뒤)를 채우려면, UTC 날짜 기준이라 서울 0–9시에도
+ * 6일 뒤 현지 자정까지 닿도록 하루 더 받는다.
+ */
+export const OPEN_METEO_FORECAST_DAYS = 8;
+
 export function openMeteoForecastUrl(
   lat: number,
   lon: number,
-  days = 7,
+  days = OPEN_METEO_FORECAST_DAYS,
   pastDays = OPEN_METEO_PAST_DAYS,
 ): string {
   const params = new URLSearchParams({

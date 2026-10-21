@@ -18,6 +18,8 @@ Deno.test("url requests three models in unix time, rounded to ~1km", () => {
   assertEquals(url.searchParams.get("timeformat"), "unixtime");
   // 기온 비교용 지난 값: 서울 7일 전 자정부터 채우려면 UTC로 8일
   assertEquals(url.searchParams.get("past_days"), "8");
+  // 7일 보기: UTC 날짜 기준이라 서울 6일 뒤 자정까지 닿으려면 8일
+  assertEquals(url.searchParams.get("forecast_days"), "8");
 });
 
 Deno.test("preceding-hour values move to the slot that starts an hour earlier", () => {
