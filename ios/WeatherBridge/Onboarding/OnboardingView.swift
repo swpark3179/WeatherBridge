@@ -16,14 +16,14 @@ struct OnboardingView: View {
             Group {
                 switch step ?? firstStep {
                 case .home:
-                    PlacePickerView(kind: .home, saveTitle: "다음") { name, coordinate in
-                        try await model.savePlace(kind: .home, name: name, coordinate: coordinate)
+                    PlacePickerView(kind: .home, remembered: model.rememberedPlace(.home), saveTitle: "다음") { name, place in
+                        try await model.savePlace(kind: .home, name: name, place: place)
                         advance(to: model.office == nil ? .office : .summary)
                     }
                     .motionTransition(Self.stepTransition)
                 case .office:
-                    PlacePickerView(kind: .office, saveTitle: "다음") { name, coordinate in
-                        try await model.savePlace(kind: .office, name: name, coordinate: coordinate)
+                    PlacePickerView(kind: .office, remembered: model.rememberedPlace(.office), saveTitle: "다음") { name, place in
+                        try await model.savePlace(kind: .office, name: name, place: place)
                         advance(to: .summary)
                     }
                     .motionTransition(Self.stepTransition)
