@@ -103,6 +103,7 @@ struct CompareChart: View {
             }
         }
         .chartLegend(.hidden)
+        .revealsPlotOnAppear()
         .chartYScale(domain: 0...100)
         .chartXScale(domain: xDomain)
         .chartYAxis {
