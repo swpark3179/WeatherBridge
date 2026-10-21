@@ -1,6 +1,6 @@
 import Foundation
 
-/// 앱이 쓰는 서버 API. 읽기는 RLS(본인 행), 쓰기는 RPC, 예보는 `today` 함수.
+/// 앱이 쓰는 서버 API. 읽기는 RLS(본인 행), 쓰기는 RPC, 예보는 `today`·`trips` 함수.
 /// 모든 요청에 publishable key(`apikey`)와 사용자 토큰(`Authorization`)을 붙인다.
 public struct SupabaseAPI: Sendable {
     public let config: AppConfig
@@ -22,6 +22,11 @@ public struct SupabaseAPI: Sendable {
         } catch SupabaseError.http(status: 404, code: .some("no_places"), message: _) {
             throw SupabaseError.noPlaces
         }
+    }
+
+    /// 여행마다 날짜별 목적지·집 날씨와 집의 지난 기온
+    public func trips() async throws -> TripsResponse {
+        try decode(TripsResponse.self, from: await send("GET", "/functions/v1/trips"))
     }
 
     // MARK: 장소
@@ -48,6 +53,27 @@ public struct SupabaseAPI: Sendable {
         let c = coordinate.rounded2
         let body = try encode(SetPlaceParams(kind: kind.rawValue, name: name, lat: c.lat, lon: c.lon, tz: tz))
         return try decode(String.self, from: await send("POST", "/rest/v1/rpc/set_place", body: body))
+    }
+
+    // MARK: 여행
+
+    /// 여행 저장. `id`가 nil이면 새로 만들고, 있으면 그 여행을 바꾼다. 날짜는 목적지 달력 날짜.
+    @discardableResult
+    public func setTrip(
+        id: String? = nil,
+        name: String,
+        coordinate: Coordinate,
+        tz: String,
+        start: LocalDate,
+        end: LocalDate
+    ) async throws -> String {
+        let c = coordinate.rounded2
+        let params = SetTripParams(id: id, name: name, lat: c.lat, lon: c.lon, tz: tz, start: start, end: end)
+        return try decode(String.self, from: await send("POST", "/rest/v1/rpc/set_trip", body: try encode(params)))
+    }
+
+    public func deleteTrip(id: String) async throws {
+        _ = try await send("POST", "/rest/v1/rpc/delete_trip", body: try encode(["p_id": id]))
     }
 
     // MARK: 설정
@@ -164,6 +190,26 @@ private struct SetPlaceParams: Encodable {
         case lat = "p_lat"
         case lon = "p_lon"
         case tz = "p_tz"
+    }
+}
+
+private struct SetTripParams: Encodable {
+    let id: String?
+    let name: String
+    let lat: Double
+    let lon: Double
+    let tz: String
+    let start: LocalDate
+    let end: LocalDate
+
+    enum CodingKeys: String, CodingKey {
+        case id = "p_id"
+        case name = "p_name"
+        case lat = "p_lat"
+        case lon = "p_lon"
+        case tz = "p_tz"
+        case start = "p_start"
+        case end = "p_end"
     }
 }
 
