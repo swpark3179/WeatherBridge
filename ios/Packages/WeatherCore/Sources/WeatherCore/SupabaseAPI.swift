@@ -58,17 +58,19 @@ public struct SupabaseAPI: Sendable {
     // MARK: 여행
 
     /// 여행 저장. `id`가 nil이면 새로 만들고, 있으면 그 여행을 바꾼다. 날짜는 목적지 달력 날짜.
+    /// 고칠 때 `destination`이 nil이면 목적지(좌표·시간대)는 그대로 둔다(앱은 좌표를 받지 않는다).
     @discardableResult
     public func setTrip(
         id: String? = nil,
         name: String,
-        coordinate: Coordinate,
-        tz: String,
+        destination: (coordinate: Coordinate, tz: String)?,
         start: LocalDate,
         end: LocalDate
     ) async throws -> String {
-        let c = coordinate.rounded2
-        let params = SetTripParams(id: id, name: name, lat: c.lat, lon: c.lon, tz: tz, start: start, end: end)
+        let c = destination?.coordinate.rounded2
+        let params = SetTripParams(
+            id: id, name: name, lat: c?.lat, lon: c?.lon, tz: destination?.tz, start: start, end: end
+        )
         return try decode(String.self, from: await send("POST", "/rest/v1/rpc/set_trip", body: try encode(params)))
     }
 
@@ -196,11 +198,24 @@ private struct SetPlaceParams: Encodable {
 private struct SetTripParams: Encodable {
     let id: String?
     let name: String
-    let lat: Double
-    let lon: Double
-    let tz: String
+    let lat: Double?
+    let lon: Double?
+    let tz: String?
     let start: LocalDate
     let end: LocalDate
+
+    /// 좌표·시간대는 없어도 null로 보낸다(기본값이 없는 인자라 빠지면 서버가 함수를 찾지 못한다).
+    /// p_id는 없으면 뺀다(서버 기본값 null).
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(lat, forKey: .lat)
+        try c.encode(lon, forKey: .lon)
+        try c.encode(tz, forKey: .tz)
+        try c.encode(start, forKey: .start)
+        try c.encode(end, forKey: .end)
+    }
 
     enum CodingKeys: String, CodingKey {
         case id = "p_id"

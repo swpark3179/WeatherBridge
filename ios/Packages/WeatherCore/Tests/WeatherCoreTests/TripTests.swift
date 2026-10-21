@@ -92,26 +92,28 @@ import Testing
     }
 
     @Test(arguments: [
-        // 최고(오늘, 기준), 최저(오늘, 기준), 문구
-        ((16.1, 20.1), (7.1, 10.1), "지금보다 조금 추워요"),
-        ((24.0, 20.0), (7.0, 10.0), "지금보다 일교차가 커요"),
-        ((16.0, 20.0), (13.0, 10.0), "지금보다 일교차가 작아요"),
-        ((20.4, 20.0), (10.0, 10.6), "지금과 비슷해요"),
+        // 최고(오늘, 기준), 최저(오늘, 기준), 방향, 문구
+        ((16.1, 20.1), (7.1, 10.1), TemperatureOutlook.Trend.colder, "지금보다 조금 추워요"),
+        ((24.0, 20.0), (7.0, 10.0), .widerSwing, "지금보다 일교차가 커요"),
+        ((16.0, 20.0), (13.0, 10.0), .narrowerSwing, "지금보다 일교차가 작아요"),
+        ((20.4, 20.0), (10.0, 10.6), .similar, "지금과 비슷해요"),
         // 한쪽만 비슷하면 다른 쪽의 체감
-        ((22.0, 20.0), (10.0, 10.0), "지금보다 조금 따뜻해요"),
-        ((32.1, 20.1), (25.2, 10.1), "지금보다 훨씬 더 더워요"),
-        ((3.5, 20.5), (-1.5, 10.5), "지금보다 많이 추워요"),
-    ])
-    func outlookHeadline(high: (Double, Double), low: (Double, Double), text: String) {
+        ((22.0, 20.0), (10.0, 10.0), .warmer, "지금보다 조금 따뜻해요"),
+        ((32.1, 20.1), (25.2, 10.1), .warmer, "지금보다 훨씬 더 더워요"),
+        ((3.5, 20.5), (-1.5, 10.5), .colder, "지금보다 많이 추워요"),
+    ] as [((Double, Double), (Double, Double), TemperatureOutlook.Trend, String)])
+    func outlookHeadline(high: (Double, Double), low: (Double, Double), trend: TemperatureOutlook.Trend, text: String) {
         let outlook = TemperatureOutlook(
             high: TemperatureDelta(today: high.0, baseline: high.1),
             low: TemperatureDelta(today: low.0, baseline: low.1)
         )
+        #expect(outlook.trend == trend)
         #expect(outlook.headline == text)
     }
 
     @Test func outlookWithOneSideOrNone() {
         #expect(TemperatureOutlook(high: nil, low: nil).headline == nil)
+        #expect(TemperatureOutlook(high: nil, low: nil).trend == nil)
         #expect(TemperatureOutlook(high: TemperatureDelta(today: 30, baseline: 24), low: nil).headline == "지금보다 훨씬 더 더워요")
         #expect(TemperatureOutlook(high: nil, low: TemperatureDelta(today: 9.6, baseline: 10)).headline == "지금과 비슷해요")
     }

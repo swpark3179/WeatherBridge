@@ -160,6 +160,11 @@ private struct SetTripBody: Decodable, Equatable {
     let p_end: String
 }
 
+private struct UpdateTripBody: Decodable {
+    let p_id: String
+    let p_end: String
+}
+
 @Suite struct SupabaseAPITests {
     private func signedIn() async -> (FakeTransport, AuthClient, SupabaseAPI) {
         let transport = FakeTransport()
@@ -295,8 +300,7 @@ private struct SetTripBody: Decodable, Equatable {
 
         let id = try await api.setTrip(
             name: "삿포로",
-            coordinate: Coordinate(lat: 43.06417, lon: 141.34694),
-            tz: "Asia/Tokyo",
+            destination: (Coordinate(lat: 43.06417, lon: 141.34694), "Asia/Tokyo"),
             start: LocalDate(year: 2026, month: 10, day: 23),
             end: LocalDate(year: 2026, month: 10, day: 24)
         )
@@ -311,13 +315,17 @@ private struct SetTripBody: Decodable, Equatable {
         // 새 여행이면 p_id를 보내지 않는다(서버 기본값 null)
         #expect(!String(decoding: created.body ?? Data(), as: UTF8.self).contains("p_id"))
 
+        // 목적지는 그대로 두고 날짜만 고치면 좌표·시간대를 null로 보낸다
         try await api.setTrip(
-            id: "t1", name: "삿포로", coordinate: Coordinate(lat: 43.06, lon: 141.35), tz: "Asia/Tokyo",
+            id: "t1", name: "삿포로", destination: nil,
             start: LocalDate(year: 2026, month: 10, day: 24), end: LocalDate(year: 2026, month: 10, day: 26)
         )
-        let updated = try JSONDecoder().decode(SetTripBody.self, from: await transport.requests.last?.body ?? Data())
+        let updateBody = await transport.requests.last?.body ?? Data()
+        let updated = try JSONDecoder().decode(UpdateTripBody.self, from: updateBody)
         #expect(updated.p_id == "t1")
         #expect(updated.p_end == "2026-10-26")
+        let raw = try #require(try JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        #expect(raw["p_lat"] is NSNull && raw["p_lon"] is NSNull && raw["p_tz"] is NSNull)
     }
 
     @Test func deleteTripSendsTheId() async throws {

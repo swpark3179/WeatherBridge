@@ -22,8 +22,9 @@ revoke all on public.trips from anon, authenticated;
 grant select on public.trips to authenticated;
 grant select, insert, update, delete on public.trips to service_role;
 
--- 여행 저장. p_id가 없으면 새로 만들고, 있으면 본인 여행의 목적지·기간을 바꾼다.
+-- 여행 저장. p_id가 없으면 새로 만들고, 있으면 본인 여행의 이름·목적지·기간을 바꾼다.
 -- 좌표는 소수 둘째 자리(약 1km)로 반올림하고, 바뀐 좌표로 기상청 격자를 다시 계산하도록 비운다.
+-- 앱은 좌표를 받지 않으므로, 고칠 때 p_lat·p_lon·p_tz를 null로 보내면 목적지를 그대로 둔다.
 create function public.set_trip(
   p_name text,
   p_lat double precision,
@@ -45,11 +46,15 @@ begin
   if coalesce(length(btrim(p_name)), 0) not between 1 and 30 then
     raise exception '이름은 1~30자여야 합니다' using errcode = '22023';
   end if;
-  if p_lat is null or p_lon is null or p_lat not between -90 and 90 or p_lon not between -180 and 180
-  then
+  if (p_lat is null) <> (p_lon is null) or (p_lat is null) <> (p_tz is null)
+    or (p_id is null and p_lat is null) then
+    raise exception '목적지(좌표·시간대)가 필요합니다' using errcode = '22023';
+  end if;
+  if p_lat not between -90 and 90 or p_lon not between -180 and 180 then
     raise exception '좌표가 올바르지 않습니다' using errcode = '22023';
   end if;
-  if not exists (select 1 from pg_catalog.pg_timezone_names where name = p_tz) then
+  if p_tz is not null and not exists (select 1 from pg_catalog.pg_timezone_names where name = p_tz)
+  then
     raise exception '알 수 없는 시간대입니다: %', p_tz using errcode = '22023';
   end if;
   if p_start is null or p_end is null or p_end < p_start then
@@ -82,11 +87,11 @@ begin
   end if;
   update public.places set
     name = btrim(p_name),
-    lat = round(p_lat::numeric, 2),
-    lon = round(p_lon::numeric, 2),
-    tz = p_tz,
-    kma_nx = null,
-    kma_ny = null,
+    lat = coalesce(round(p_lat::numeric, 2), lat),
+    lon = coalesce(round(p_lon::numeric, 2), lon),
+    tz = coalesce(p_tz, tz),
+    kma_nx = case when p_lat is null then kma_nx end,
+    kma_ny = case when p_lat is null then kma_ny end,
     active = true
   where id = v_place;
   update public.trips set start_date = p_start, end_date = p_end where id = p_id;

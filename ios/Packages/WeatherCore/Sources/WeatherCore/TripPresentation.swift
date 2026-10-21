@@ -77,36 +77,54 @@ public struct TemperatureOutlook: Hashable, Sendable {
     /// 기준을 부르는 말
     public static let nowLabel = "지금"
 
+    /// 지금보다 어떻게 달라지는지 (색·아이콘에 쓴다)
+    public enum Trend: Hashable, Sendable {
+        case similar, colder, warmer
+        /// 최고는 오르고 최저는 내려 일교차가 커진다
+        case widerSwing
+        /// 최고는 내리고 최저는 올라 일교차가 작아진다
+        case narrowerSwing
+    }
+
     public let high: TemperatureDelta?
     public let low: TemperatureDelta?
+    /// 비교할 값이 없으면 nil
+    public let trend: Trend?
     /// "지금보다 조금 추워요", "지금보다 일교차가 커요", "지금과 비슷해요". 비교할 값이 없으면 nil
     public let headline: String?
 
     public init(high: TemperatureDelta?, low: TemperatureDelta?) {
         self.high = high
         self.low = low
-        headline = Self.headline(high: high, low: low)
+        let described = Self.describe(high: high, low: low)
+        trend = described?.trend
+        headline = described?.text
     }
 
     /// 최고·최저가 반대로 움직이면 일교차로 말하고, 아니면 하루 가운데 값(최고·최저 평균)의 체감으로 말한다.
-    static func headline(high: TemperatureDelta?, low: TemperatureDelta?) -> String? {
+    /// 가운데 값이 비슷하면 비슷하지 않은 쪽의 체감을 쓴다.
+    static func describe(high: TemperatureDelta?, low: TemperatureDelta?) -> (trend: Trend, text: String)? {
         let label = nowLabel
-        let similar = "\(Hangul.withAnd(label)) 비슷해요"
+        let similar = (Trend.similar, "\(Hangul.withAnd(label)) 비슷해요")
+        func felt(_ delta: TemperatureDelta) -> (Trend, String)? {
+            delta.feeling.map { (delta.degrees < 0 ? .colder : .warmer, "\(label)보다 \($0)") }
+        }
         switch (high, low) {
         case (nil, nil):
             return nil
         case (let one?, nil), (nil, let one?):
-            return one.feeling.map { "\(label)보다 \($0)" } ?? similar
+            return felt(one) ?? similar
         case let (high?, low?):
             if !high.isSimilar, !low.isSimilar, (high.degrees > 0) != (low.degrees > 0) {
-                return "\(label)보다 일교차가 \(high.degrees > 0 ? "커요" : "작아요")"
+                return high.degrees > 0
+                    ? (.widerSwing, "\(label)보다 일교차가 커요")
+                    : (.narrowerSwing, "\(label)보다 일교차가 작아요")
             }
             let middle = TemperatureDelta(
                 today: (high.today + low.today) / 2,
                 baseline: (high.baseline + low.baseline) / 2
             )
-            let feeling = middle.feeling ?? (high.isSimilar ? low : high).feeling
-            return feeling.map { "\(label)보다 \($0)" } ?? similar
+            return felt(middle) ?? felt(high.isSimilar ? low : high) ?? similar
         }
     }
 }
