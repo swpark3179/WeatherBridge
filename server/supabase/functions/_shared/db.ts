@@ -1,6 +1,7 @@
 /**
  * 저장소. Edge Function에서는 Supabase(서비스 키), 테스트에서는 MemoryRepo를 쓴다.
- * 테이블 정의: server/supabase/migrations/20261018000000_forecast_core.sql, 20261020000000_phase2_users.sql
+ * 테이블 정의: server/supabase/migrations/20261018000000_forecast_core.sql, 20261020000000_phase2_users.sql,
+ * 20261022000000_trips.sql
  */
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import type { HourSlot, Observation, ProviderForecast, ProviderId } from "./forecast_types.ts";
@@ -18,6 +19,17 @@ export interface Place {
   tz: string;
   kmaNx: number | null;
   kmaNy: number | null;
+}
+
+/** 여행: 목적지 장소(kind='trip')와 기간 */
+export interface Trip {
+  id: string;
+  userId: string;
+  place: Place;
+  /** 목적지 현지 날짜 "YYYY-MM-DD" */
+  startDate: string;
+  /** 목적지 현지 날짜 "YYYY-MM-DD" (그 날 포함) */
+  endDate: string;
 }
 
 export interface CacheEntry {
@@ -108,6 +120,10 @@ export interface Repo {
   listActivePlaces(): Promise<Place[]>;
   /** 사용자의 활성 집·회사 */
   listUserPlaces(userId: string): Promise<Place[]>;
+  /** 모든 여행. refresh가 예보를 받을 목적지를 고른다. */
+  listTrips(): Promise<Trip[]>;
+  /** 사용자의 여행 (시작일 순) */
+  listUserTrips(userId: string): Promise<Trip[]>;
   getUserSettings(userId: string): Promise<UserSettings | null>;
   /** 요약 알림을 켠 사용자 */
   listSummaryCandidates(): Promise<UserSettings[]>;
@@ -149,6 +165,7 @@ function secretKey(): string {
 
 const PLACE_COLUMNS = "id, user_id, kind, name, lat, lon, tz, kma_nx, kma_ny";
 const SETTINGS_COLUMNS = "user_id, tz, summary_enabled, summary_time, threshold";
+const TRIP_COLUMNS = `id, user_id, start_date, end_date, place:places!inner(${PLACE_COLUMNS})`;
 
 // deno-lint-ignore no-explicit-any
 function toPlace(r: any): Place {
@@ -162,6 +179,17 @@ function toPlace(r: any): Place {
     tz: r.tz,
     kmaNx: r.kma_nx,
     kmaNy: r.kma_ny,
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function toTrip(r: any): Trip {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    place: toPlace(r.place),
+    startDate: r.start_date,
+    endDate: r.end_date,
   };
 }
 
@@ -206,6 +234,16 @@ export function supabaseRepo(client?: SupabaseClient): Repo {
           .in("kind", ["home", "office"]).order("created_at"),
       ) ?? [];
       return rows.map(toPlace);
+    },
+    async listTrips() {
+      const rows = check(await db.from("trips").select(TRIP_COLUMNS).order("start_date")) ?? [];
+      return rows.map(toTrip);
+    },
+    async listUserTrips(userId) {
+      const rows = check(
+        await db.from("trips").select(TRIP_COLUMNS).eq("user_id", userId).order("start_date"),
+      ) ?? [];
+      return rows.map(toTrip);
     },
     async getUserSettings(userId) {
       const row = check(
@@ -406,9 +444,19 @@ type MemoryDevice = Device & {
   lastSeenAt?: number;
 };
 
+/** 테스트에서 넣는 여행. 목적지는 places에 함께 넣는다. */
+export interface MemoryTrip {
+  id: string;
+  userId: string;
+  placeId: string;
+  startDate: string;
+  endDate: string;
+}
+
 /** 테스트용 메모리 저장소 */
 export class MemoryRepo implements Repo {
   places: Place[] = [];
+  trips: MemoryTrip[] = [];
   cache = new Map<string, CacheEntry>();
   logs: ForecastLogRow[] = [];
   observations = new Map<string, Observation>();
@@ -430,6 +478,26 @@ export class MemoryRepo implements Repo {
         ),
       ),
     );
+  }
+  listTrips() {
+    return Promise.resolve(this.joinedTrips());
+  }
+  listUserTrips(userId: string) {
+    return Promise.resolve(this.joinedTrips().filter((t) => t.userId === userId));
+  }
+  private joinedTrips(): Trip[] {
+    return [...this.trips].sort((a, b) => a.startDate.localeCompare(b.startDate)).flatMap((t) => {
+      const place = this.places.find((p) => p.id === t.placeId);
+      return place
+        ? [{
+          id: t.id,
+          userId: t.userId,
+          place: structuredClone(place),
+          startDate: t.startDate,
+          endDate: t.endDate,
+        }]
+        : [];
+    });
   }
   getUserSettings(userId: string) {
     return Promise.resolve(structuredClone(this.settings.find((s) => s.userId === userId) ?? null));

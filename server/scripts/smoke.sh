@@ -3,7 +3,8 @@
 #   PROJECT_ID=<ref> SPIKE_TOKEN=<token> [SUPABASE_REGION=ap-northeast-2] [SUPABASE_API_KEY=sb_publishable_…] \
 #     bash server/scripts/smoke.sh
 # SUPABASE_REGION을 주면 그 리전에서 함수를 실행한다(x-region). 없으면 호출한 곳에서 가까운 리전.
-# SUPABASE_API_KEY(publishable)를 주면 익명 사용자를 만들어 앱 경로(set_place → register_device → today)를 점검하고 지운다.
+# SUPABASE_API_KEY(publishable)를 주면 익명 사용자를 만들어 앱 경로(set_place → register_device → today → set_trip → trips)를
+# 점검하고 지운다.
 # SMOKE_BASE_URL을 주면 그 주소로 호출한다(로컬 확인용).
 set -uo pipefail
 
@@ -102,9 +103,11 @@ else
   [ "$(echo "$BODY" | jq '.errors | length')" -eq 0 ] || warn "dispatch 오류: $(echo "$BODY" | jq -c '.errors')"
 fi
 
-echo "## 6. today (앱 사용자 인증)"
-STATUS=$(curl -sS -o /dev/null -w '%{http_code}' ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} "${BASE}/today")
-[ "$STATUS" = 401 ] && echo "토큰 없이 호출 → 401 (정상)" || fail "today가 토큰 없이 HTTP $STATUS를 돌려줬습니다 (401이어야 함)"
+echo "## 6. today·trips (앱 사용자 인증)"
+for fn in today trips; do
+  STATUS=$(curl -sS -o /dev/null -w '%{http_code}' ${REGION_HEADER[@]+"${REGION_HEADER[@]}"} "${BASE}/${fn}")
+  [ "$STATUS" = 401 ] && echo "${fn}: 토큰 없이 호출 → 401 (정상)" || fail "${fn}가 토큰 없이 HTTP $STATUS를 돌려줬습니다 (401이어야 함)"
+done
 
 if [ -z "${SUPABASE_API_KEY:-}" ]; then
   warn "SUPABASE_API_KEY가 없어 익명 사용자 점검을 건너뜁니다"
@@ -164,6 +167,38 @@ else
       echo "$BODY" | jq '{preview: .previews[0].payload.aps.alert}'
     else
       fail "dispatch(dry_run, user) HTTP $STATUS: $BODY"
+    fi
+
+    echo "## 7. trips (여행: 도쿄역, 모레부터 사흘)"
+    TRIP_START=$(date -u -d '+2 day' +%F)
+    TRIP_END=$(date -u -d '+4 day' +%F)
+    app POST "${ROOT}/rest/v1/rpc/set_trip" \
+      "{\"p_name\":\"점검 여행\",\"p_lat\":35.6812,\"p_lon\":139.7671,\"p_tz\":\"Asia/Tokyo\",\"p_start\":\"${TRIP_START}\",\"p_end\":\"${TRIP_END}\"}"
+    if [ "$STATUS" != 200 ]; then
+      fail "set_trip HTTP $STATUS: $BODY"
+    else
+      TRIP_ID=$(echo "$BODY" | jq -r '.')
+      app GET "${BASE}/trips"
+      if [ "$STATUS" != 200 ]; then
+        fail "trips HTTP $STATUS: $BODY"
+      else
+        # 날짜마다 기온에 쓴 모델과 운량·적설이 실제로 오는지 본다(모델마다 예보 범위가 다르다).
+        echo "$BODY" | jq '{home: (.home | if . then {name, tz,
+            recent: [.recent[] | "\(.providers[0]) \(.temps | length)h"]} else null end),
+          trips: [.trips[] | {name, tz, startDate, endDate, watched, days: [.days[] | {date,
+            destination: (.destination | if . then
+              {models: (.temps.providers // []), cloud, snowCm, pop: .rain.pop} else null end),
+            home: (.home | if . then {models: (.temps.providers // []), cloud, pop: .rain.pop}
+              else null end)}]}]}'
+        echo "$BODY" | jq -e '.trips | length == 1 and .[0].watched' >/dev/null || fail "trips: 등록한 여행이 없거나 예보를 받지 않습니다"
+        echo "$BODY" | jq -e '.trips[0].days | length == 3 and all(.destination.temps.temps | length > 0)' >/dev/null ||
+          fail "trips: 여행 날짜마다 목적지 기온이 있어야 합니다"
+        echo "$BODY" | jq -e 'any(.trips[0].days[]; .destination.cloud != null)' >/dev/null || warn "trips: 목적지 운량이 없습니다"
+        echo "$BODY" | jq -e '.home.recent | length > 0' >/dev/null || fail "trips: 집의 지난 기온(home.recent)이 없습니다"
+        echo "$BODY" | jq -e 'tostring | test("139\\.7|37\\.5") | not' >/dev/null || fail "trips 응답에 좌표가 있습니다"
+      fi
+      app POST "${ROOT}/rest/v1/rpc/delete_trip" "{\"p_id\":\"${TRIP_ID}\"}"
+      [[ "$STATUS" == 20[04] ]] && echo "여행 삭제" || fail "delete_trip HTTP $STATUS: $BODY"
     fi
     cleanup
   fi

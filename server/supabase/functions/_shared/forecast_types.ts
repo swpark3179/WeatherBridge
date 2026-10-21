@@ -24,6 +24,10 @@ export interface HourSlot {
   precipMm: number | null;
   /** 기온(°C, t 시각) */
   temp: number | null;
+  /** 운량(%, t 시각). Open-Meteo만 준다. 이 필드가 생기기 전에 캐시된 예보에는 없다 */
+  cloud?: number | null;
+  /** 구간 적설(cm). Open-Meteo만 준다. 이 필드가 생기기 전에 캐시된 예보에는 없다 */
+  snowCm?: number | null;
 }
 
 export interface ProviderForecast {

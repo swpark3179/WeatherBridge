@@ -1,6 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
 import { MemoryRepo, type Place } from "../supabase/functions/_shared/db.ts";
-import { ensureForecasts, refreshAll } from "../supabase/functions/_shared/forecast_service.ts";
+import {
+  ensureForecasts,
+  isTripWatched,
+  refreshAll,
+} from "../supabase/functions/_shared/forecast_service.ts";
 import { kmaNcstBody, kmaVilageBody, kst, openMeteoBody, routedFetch } from "./fixtures.ts";
 
 const NOW = kst(2026, 10, 19, 7, 20); // 05시 발표가 최신, 06시 실황
@@ -164,4 +168,61 @@ Deno.test("a failing source keeps the stale cache and reports the error", async 
     "om_gfs",
     "om_icon",
   ]);
+});
+
+function tripOf(repo: MemoryRepo, dest: Place, startDate: string, endDate: string) {
+  repo.places.push(dest);
+  repo.trips.push({ id: crypto.randomUUID(), userId: "u1", placeId: dest.id, startDate, endDate });
+}
+
+Deno.test("refresh fetches only watched trips and keeps them out of the logs", async () => {
+  const repo = new MemoryRepo();
+  repo.places = [place({ userId: "u1" })];
+  const busan = place({ userId: "u1", kind: "trip", name: "부산", lat: 35.18, lon: 129.08 });
+  tripOf(repo, busan, "2026-10-25", "2026-10-27"); // 6일 뒤 출발
+  tripOf(repo, place({ userId: "u1", kind: "trip", name: "먼 곳" }), "2026-11-04", "2026-11-05");
+  tripOf(repo, place({ userId: "u1", kind: "trip", name: "지난" }), "2026-10-10", "2026-10-18");
+  const { fn, calls } = apis();
+
+  const summary = await refreshAll(deps(repo, fn));
+
+  assertEquals(summary.places, 2);
+  assertEquals(summary.fetched.filter((f) => f.endsWith("@trip")).sort(), [
+    "kma_short@trip",
+    "om_ecmwf@trip",
+    "om_gfs@trip",
+    "om_icon@trip",
+  ]);
+  assertEquals(calls.filter((c) => c.includes("open-meteo")).length, 2);
+  // 기록·실황은 집만
+  assertEquals(summary.logged, 4);
+  assertEquals(new Set(repo.logs.map((l) => l.locKey)), new Set(["kma:60:127", "ll:37.57:126.98"]));
+  assertEquals(summary.observations, 1);
+  // 여행지 격자도 저장한다(다음 조회에서 다시 계산하지 않게)
+  assert(repo.places.find((p) => p.id === busan.id)!.kmaNx !== null);
+});
+
+Deno.test("a trip at the home's location does not take the home's log", async () => {
+  const repo = new MemoryRepo();
+  tripOf(repo, place({ userId: "u1", kind: "trip", name: "집 근처" }), "2026-10-19", "2026-10-20");
+  repo.places.push(place({ userId: "u1" }));
+  const summary = await refreshAll(deps(repo, apis().fn));
+  assertEquals(summary.places, 2);
+  assertEquals(summary.logged, 4);
+});
+
+Deno.test("trips are watched by the destination's local date until they end", () => {
+  // NOW는 서울 10/19 07:20, 호놀룰루 10/18 12:20
+  const at = (tz: string) => place({ kind: "trip", tz });
+  const trip = (tz: string, startDate: string, endDate: string) => ({
+    place: at(tz),
+    startDate,
+    endDate,
+  });
+  assert(isTripWatched(trip("Pacific/Honolulu", "2026-10-16", "2026-10-18"), NOW));
+  assert(!isTripWatched(trip("Asia/Tokyo", "2026-10-16", "2026-10-18"), NOW));
+  // 15일 뒤 시작까지 받는다
+  assert(isTripWatched(trip("Asia/Seoul", "2026-11-03", "2026-11-05"), NOW));
+  assert(!isTripWatched(trip("Asia/Seoul", "2026-11-04", "2026-11-05"), NOW));
+  assert(!isTripWatched(trip("Not/AZone", "2026-10-19", "2026-10-20"), NOW));
 });

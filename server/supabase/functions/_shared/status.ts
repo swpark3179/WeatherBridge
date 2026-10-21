@@ -59,8 +59,9 @@ export async function buildStatus(
     if (!u) users.set(userId, u = { user: short(userId), places: [], summary: null });
     return u;
   };
+  // 여행지는 여러 개일 수 있어 집·회사 등록 여부만 본다.
   for (const p of places) {
-    if (p.userId !== null) entry(p.userId).places.push(p.kind);
+    if (p.userId !== null && p.kind !== "trip") entry(p.userId).places.push(p.kind);
   }
   for (const s of candidates) {
     entry(s.userId).summary = { time: s.summaryTime, tz: s.tz, threshold: s.threshold };
