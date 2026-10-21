@@ -29,3 +29,7 @@ verify_jwt = false
 # 플랫폼 검사는 레거시(HS256) 토큰만 이해하는 경우가 있어 끈다.
 [functions.today]
 verify_jwt = false
+
+# 앱 여행 화면. today와 같은 방식으로 함수 안에서 사용자 JWT를 검증한다.
+[functions.trips]
+verify_jwt = false

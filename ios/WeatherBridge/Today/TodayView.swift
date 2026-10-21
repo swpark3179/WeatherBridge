@@ -11,7 +11,7 @@ struct TodayView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var cardTransition
-    /// 장면 상태로만 기억한다 (UserDefaults는 쓰지 않는다 — TodayCache 참고)
+    /// 장면 상태로만 기억한다 (UserDefaults는 쓰지 않는다 — FileCache 참고)
     @SceneStorage("rainRange") private var range: RainRange = .day
 
     var body: some View {

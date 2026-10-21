@@ -72,9 +72,24 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
     }
 }
 
+/// 고른 장소: 이름, 좌표, (알 수 있으면) 그곳의 시간대
+struct PickedPlace: Equatable {
+    var label: String
+    var coordinate: Coordinate
+    var timeZone: TimeZone?
+}
+
 /// 주소·장소 이름 검색 (Apple 지도). 한국 주소와 회사·건물 이름을 찾을 수 있다.
 @MainActor
 final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    /// 결과를 먼저 보여줄 지역
+    enum Region {
+        /// 한반도 중심. 해외 주소도 검색은 되지만 국내 결과를 먼저 보여준다.
+        case korea
+        /// 지역 편향 없이 (여행지)
+        case world
+    }
+
     struct Suggestion: Identifiable, Hashable {
         let id: Int
         let title: String
@@ -89,22 +104,28 @@ final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDeleg
 
     private let completer = MKLocalSearchCompleter()
 
-    override init() {
+    init(region: Region = .korea) {
         super.init()
         completer.delegate = self
         completer.resultTypes = [.address, .pointOfInterest]
-        // 한반도 중심. 해외 주소도 검색은 되지만 국내 결과를 먼저 보여준다.
-        completer.region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 36.4, longitude: 127.8),
-            span: MKCoordinateSpan(latitudeDelta: 7, longitudeDelta: 7)
-        )
+        if region == .korea {
+            completer.region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 36.4, longitude: 127.8),
+                span: MKCoordinateSpan(latitudeDelta: 7, longitudeDelta: 7)
+            )
+        }
     }
 
-    func coordinate(for suggestion: Suggestion) async throws -> Coordinate {
+    /// 고른 제안의 좌표와 시간대
+    func place(for suggestion: Suggestion) async throws -> PickedPlace {
         let response = try await MKLocalSearch(request: MKLocalSearch.Request(completion: suggestion.completion)).start()
         guard let item = response.mapItems.first else { throw LocationProvider.LocationError.unavailable }
         let c = item.placemark.coordinate
-        return Coordinate(lat: c.latitude, lon: c.longitude)
+        return PickedPlace(
+            label: suggestion.title,
+            coordinate: Coordinate(lat: c.latitude, lon: c.longitude),
+            timeZone: item.timeZone
+        )
     }
 
     // 검색 완성기도 메인 스레드에서 만들었으므로 콜백이 메인 스레드로 온다.

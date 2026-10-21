@@ -58,6 +58,9 @@ struct ContentView: View {
                 Tab("비교", systemImage: "chart.xyaxis.line", value: AppTab.compare) {
                     CompareView()
                 }
+                Tab("여행", systemImage: "airplane", value: AppTab.trips) {
+                    TripListView()
+                }
                 Tab("설정", systemImage: "gearshape", value: AppTab.settings) {
                     SettingsView()
                 }

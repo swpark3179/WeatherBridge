@@ -2,10 +2,10 @@ import Foundation
 import WeatherCore
 
 enum AppTab: Hashable {
-    case today, compare, settings
+    case today, compare, trips, settings
 }
 
-/// 앱 전체 상태: 로그인(익명), 집·회사, 설정, 오늘 예보, 기기 등록.
+/// 앱 전체 상태: 로그인(익명), 집·회사, 설정, 오늘 예보, 여행, 기기 등록.
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase: Equatable {
@@ -27,6 +27,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var todayIsCached = false
     @Published private(set) var todayError: String?
     @Published private(set) var isRefreshing = false
+    @Published private(set) var trips: TripsResponse?
+    /// 화면의 trips가 저장해 둔 응답이면 true
+    @Published private(set) var tripsIsCached = false
+    @Published private(set) var tripsError: String?
+    @Published private(set) var isRefreshingTrips = false
     /// 잠깐 보여줄 안내 (저장 실패 등)
     @Published var notice: String?
     /// 오늘 화면에서 비교 탭으로 바로 갈 때 바꾼다
@@ -41,6 +46,8 @@ final class AppModel: ObservableObject {
     private var pushToStartToken: String?
     private var registered: (apns: String, pushToStart: String?)?
     private var registrationFailed = false
+    /// 여행을 받는 중에 저장·삭제가 있었으면 끝나고 한 번 더 받는다
+    private var tripsReloadPending = false
 
     init(bundle: Bundle = .main) {
         let info = bundle.infoDictionary ?? [:]
@@ -86,9 +93,13 @@ final class AppModel: ObservableObject {
             return
         }
         phase = .loading
-        if today == nil, let cached = TodayCache.load() {
+        if today == nil, let cached = ResponseCache.today.load() {
             today = cached
             todayIsCached = true
+        }
+        if trips == nil, let cached = ResponseCache.trips.load() {
+            trips = cached
+            tripsIsCached = true
         }
         do {
             async let loadedPlaces = api.places()
@@ -104,7 +115,7 @@ final class AppModel: ObservableObject {
             phase = home != nil && office != nil ? .ready : .onboarding
             await registerDeviceIfNeeded()
             if phase == .ready {
-                await refreshToday()
+                await refreshAll()
             }
         } catch {
             if today != nil {
@@ -126,6 +137,8 @@ final class AppModel: ObservableObject {
         places = try await api.places()
         if phase == .ready {
             await refreshToday()
+            // 여행의 "지금"은 집 최근 3일이라 집이 바뀌면 다시 받는다
+            if kind == .home { await refreshTrips() }
         }
     }
 
@@ -151,10 +164,17 @@ final class AppModel: ObservableObject {
 
     func finishOnboarding() {
         phase = .ready
-        Task { await refreshToday() }
+        Task { await refreshAll() }
     }
 
     // MARK: 예보
+
+    /// 오늘과 여행을 함께 받는다
+    func refreshAll() async {
+        async let todayDone: Void = refreshToday()
+        async let tripsDone: Void = refreshTrips()
+        _ = await (todayDone, tripsDone)
+    }
 
     func refreshToday() async {
         guard let api, !isRefreshing else { return }
@@ -165,12 +185,59 @@ final class AppModel: ObservableObject {
             today = fresh
             todayIsCached = false
             todayError = nil
-            TodayCache.save(fresh)
+            ResponseCache.today.save(fresh)
         } catch SupabaseError.noPlaces {
             phase = .onboarding
         } catch {
             todayError = Self.describe(error)
         }
+    }
+
+    // MARK: 여행
+
+    func refreshTrips() async {
+        guard let api else { return }
+        if isRefreshingTrips {
+            tripsReloadPending = true
+            return
+        }
+        isRefreshingTrips = true
+        defer { isRefreshingTrips = false }
+        repeat {
+            tripsReloadPending = false
+            do {
+                let fresh = try await api.trips()
+                trips = fresh
+                tripsIsCached = false
+                tripsError = nil
+                ResponseCache.trips.save(fresh)
+            } catch {
+                tripsError = Self.describe(error)
+            }
+        } while tripsReloadPending
+    }
+
+    /// 여행 저장. `id`가 nil이면 새 여행. 고칠 때 `destination`이 nil이면 목적지는 그대로 둔다.
+    @discardableResult
+    func saveTrip(
+        id: String?,
+        name: String,
+        destination: (coordinate: Coordinate, tz: String)?,
+        start: LocalDate,
+        end: LocalDate
+    ) async throws -> String {
+        guard let api else { throw SupabaseError.notConfigured }
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30))
+        let saved = try await api.setTrip(id: id, name: trimmed, destination: destination, start: start, end: end)
+        await refreshTrips()
+        return saved
+    }
+
+    func deleteTrip(id: String) async throws {
+        guard let api else { throw SupabaseError.notConfigured }
+        try await api.deleteTrip(id: id)
+        trips?.trips.removeAll { $0.id == id }
+        await refreshTrips()
     }
 
     // MARK: 기기 등록
@@ -179,7 +246,7 @@ final class AppModel: ObservableObject {
     func didBecomeActive() async {
         await registerDeviceIfNeeded()
         if phase == .ready {
-            await refreshToday()
+            await refreshAll()
         }
     }
 
@@ -220,7 +287,9 @@ final class AppModel: ObservableObject {
             try await api.deleteAccount()
             places = []
             today = nil
-            TodayCache.clear()
+            trips = nil
+            ResponseCache.today.clear()
+            ResponseCache.trips.clear()
             registered = nil
             settings = UserSettings(tz: TimeZone.current.identifier)
             hasSavedSettings = false

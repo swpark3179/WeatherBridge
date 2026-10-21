@@ -150,6 +150,21 @@ private struct SetPlaceBody: Decodable, Equatable {
     let p_tz: String
 }
 
+private struct SetTripBody: Decodable, Equatable {
+    let p_id: String?
+    let p_name: String
+    let p_lat: Double
+    let p_lon: Double
+    let p_tz: String
+    let p_start: String
+    let p_end: String
+}
+
+private struct UpdateTripBody: Decodable {
+    let p_id: String
+    let p_end: String
+}
+
 @Suite struct SupabaseAPITests {
     private func signedIn() async -> (FakeTransport, AuthClient, SupabaseAPI) {
         let transport = FakeTransport()
@@ -263,6 +278,63 @@ private struct SetPlaceBody: Decodable, Equatable {
         await transport.on("/rest/v1/rpc/delete_my_account", status: 204, json: "")
         try await api.deleteAccount()
         #expect(await auth.userId == nil)
+    }
+
+    @Test func tripsDecodesTheContractFixture() async throws {
+        let (transport, _, api) = await signedIn()
+        let url = try #require(Bundle.module.url(forResource: "trips_response", withExtension: "json", subdirectory: "Fixtures"))
+        let fixture = try Data(contentsOf: url)
+        await transport.on("/functions/v1/trips") { _ in HTTPResponse(status: 200, body: fixture) }
+
+        let trips = try await api.trips()
+
+        #expect(trips.trips.map(\.name) == ["콜카타", "삿포로", "파리", "제주"])
+        let request = try #require(await transport.requests.first)
+        #expect(request.method == "GET")
+        #expect(request.headers["authorization"] == "Bearer tok")
+    }
+
+    @Test func setTripSendsDatesAndRoundedCoordinates() async throws {
+        let (transport, _, api) = await signedIn()
+        await transport.on("/rest/v1/rpc/set_trip", json: #""t1""#)
+
+        let id = try await api.setTrip(
+            name: "삿포로",
+            destination: (Coordinate(lat: 43.06417, lon: 141.34694), "Asia/Tokyo"),
+            start: LocalDate(year: 2026, month: 10, day: 23),
+            end: LocalDate(year: 2026, month: 10, day: 24)
+        )
+
+        #expect(id == "t1")
+        let created = try #require(await transport.requests.first)
+        let body = try JSONDecoder().decode(SetTripBody.self, from: created.body ?? Data())
+        #expect(body == SetTripBody(
+            p_id: nil, p_name: "삿포로", p_lat: 43.06, p_lon: 141.35, p_tz: "Asia/Tokyo",
+            p_start: "2026-10-23", p_end: "2026-10-24"
+        ))
+        // 새 여행이면 p_id를 보내지 않는다(서버 기본값 null)
+        #expect(!String(decoding: created.body ?? Data(), as: UTF8.self).contains("p_id"))
+
+        // 목적지는 그대로 두고 날짜만 고치면 좌표·시간대를 null로 보낸다
+        try await api.setTrip(
+            id: "t1", name: "삿포로", destination: nil,
+            start: LocalDate(year: 2026, month: 10, day: 24), end: LocalDate(year: 2026, month: 10, day: 26)
+        )
+        let updateBody = await transport.requests.last?.body ?? Data()
+        let updated = try JSONDecoder().decode(UpdateTripBody.self, from: updateBody)
+        #expect(updated.p_id == "t1")
+        #expect(updated.p_end == "2026-10-26")
+        let raw = try #require(try JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        #expect(raw["p_lat"] is NSNull && raw["p_lon"] is NSNull && raw["p_tz"] is NSNull)
+    }
+
+    @Test func deleteTripSendsTheId() async throws {
+        let (transport, _, api) = await signedIn()
+        await transport.on("/rest/v1/rpc/delete_trip", status: 204, json: "")
+        try await api.deleteTrip(id: "t1")
+        let request = try #require(await transport.requests.first)
+        #expect(request.method == "POST")
+        #expect(try JSONDecoder().decode([String: String].self, from: request.body ?? Data()) == ["p_id": "t1"])
     }
 
     @Test func surfacesPostgrestErrors() async throws {

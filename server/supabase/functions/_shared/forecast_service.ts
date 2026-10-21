@@ -1,12 +1,13 @@
 /**
  * 장소별 예보 확보(캐시 우선)와 주기 수집(refresh). Edge Function들이 공유한다.
  */
-import type { CacheEntry, Place, Repo } from "./db.ts";
+import type { CacheEntry, Place, Repo, Trip } from "./db.ts";
 import type { FetchFn, ProviderForecast, ProviderId } from "./forecast_types.ts";
 import { isKmaCovered, type KmaGrid, kmaLocKey, toKmaGrid } from "./kma_grid.ts";
 import { kstToEpoch, latestVilageBase, nextVilageAvailableAt } from "./kma_time.ts";
 import { fetchKmaObservation, fetchKmaShort } from "./providers/kma.ts";
 import { fetchOpenMeteo, OPEN_METEO_MODELS } from "./providers/open_meteo.ts";
+import { addDays, formatLocalDate, localDateOf } from "./schedule.ts";
 
 export interface Deps {
   repo: Repo;
@@ -14,6 +15,9 @@ export interface Deps {
   kmaServiceKey?: string;
   fetchFn?: FetchFn;
 }
+
+/** 여행 목적지 예보를 받기 시작하는 때: 출발 이만큼 전(목적지 현지 날짜). Open-Meteo가 닿는 끝이다. */
+export const TRIP_LEAD_DAYS = 15;
 
 /** 기록에 남기는 예보 범위 */
 const LOG_HORIZON_SEC = 72 * 3600;
@@ -28,6 +32,23 @@ function placeGrid(place: Place): KmaGrid | null {
   if (!isKmaCovered(place.lat, place.lon)) return null;
   if (place.kmaNx !== null && place.kmaNy !== null) return { nx: place.kmaNx, ny: place.kmaNy };
   return toKmaGrid(place.lat, place.lon);
+}
+
+/**
+ * 여행 목적지 예보를 받을지: 목적지 현지 날짜로 아직 끝나지 않았고, TRIP_LEAD_DAYS일 안에 시작한다.
+ * 날짜는 "YYYY-MM-DD"라 문자열로 비교한다.
+ */
+export function isTripWatched(
+  trip: Pick<Trip, "startDate" | "endDate" | "place">,
+  nowSec: number,
+): boolean {
+  try {
+    const today = localDateOf(nowSec, trip.place.tz);
+    return trip.endDate >= formatLocalDate(today) &&
+      trip.startDate <= formatLocalDate(addDays(today, TRIP_LEAD_DAYS));
+  } catch {
+    return false; // 알 수 없는 시간대
+  }
 }
 
 export interface EnsureResult {
@@ -113,11 +134,20 @@ export interface RefreshSummary {
 }
 
 /**
- * 주기 수집: 모든 활성 장소의 예보를 최신으로 맞추고, 기록(forecast_log, obs_log)을 남긴다.
+ * 주기 수집: 활성 장소의 예보를 최신으로 맞추고, 기록(forecast_log, obs_log)을 남긴다.
  * 예보 기록은 기상청 발표 주기(3시간)에 맞춰 소스·위치별 1회만 남긴다.
+ * 여행 목적지는 감시 중인 여행(isTripWatched)만 받고, 기록은 남기지 않는다(정확도 평가는 집·회사만).
  */
 export async function refreshAll(deps: Deps): Promise<RefreshSummary> {
-  const places = await deps.repo.listActivePlaces();
+  const now = Math.floor(deps.nowMs() / 1000);
+  const [active, trips] = await Promise.all([
+    deps.repo.listActivePlaces(),
+    deps.repo.listTrips(),
+  ]);
+  const watched = new Set(trips.filter((t) => isTripWatched(t, now)).map((t) => t.place.id));
+  // 집·회사를 먼저: 같은 위치의 여행지가 있어도 집·회사의 기록이 남는다.
+  const places = active.filter((p) => p.kind !== "trip" || watched.has(p.id))
+    .sort((a, b) => Number(a.kind === "trip") - Number(b.kind === "trip"));
   const summary: RefreshSummary = {
     places: places.length,
     fetched: [],
@@ -125,7 +155,6 @@ export async function refreshAll(deps: Deps): Promise<RefreshSummary> {
     observations: 0,
     errors: [],
   };
-  const now = Math.floor(deps.nowMs() / 1000);
   const base = latestVilageBase(deps.nowMs());
   const logBucket = kstToEpoch(base.baseDate, base.baseTime);
   const seenLoc = new Set<string>();
@@ -136,11 +165,13 @@ export async function refreshAll(deps: Deps): Promise<RefreshSummary> {
     if (grid && (place.kmaNx === null || place.kmaNy === null)) {
       await deps.repo.setPlaceGrid(place.id, grid.nx, grid.ny);
     }
-    if (grid) grids.set(kmaLocKey(grid), grid);
+    const isTrip = place.kind === "trip";
+    if (grid && !isTrip) grids.set(kmaLocKey(grid), grid);
 
     const { forecasts, fetched, errors } = await ensureForecasts(place, deps);
     summary.fetched.push(...fetched.map((p) => `${p}@${place.kind}`));
     summary.errors.push(...errors.map((e) => `${place.kind}: ${e}`));
+    if (isTrip) continue;
 
     for (const f of forecasts) {
       const locKey = f.family === "kma" && grid ? kmaLocKey(grid) : openMeteoLocKey(place);

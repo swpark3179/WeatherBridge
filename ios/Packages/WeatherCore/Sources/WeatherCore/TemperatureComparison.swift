@@ -51,10 +51,15 @@ public struct TemperatureDelta: Hashable, Sendable {
 
     /// "어제보다 3° 낮아요", "최근 7일 평균보다 2° 높아요", "어제와 비슷해요"
     public func sentence(_ baseline: TemperatureBaseline) -> String {
+        sentence(comparedTo: baseline.valueLabel)
+    }
+
+    /// "지금보다 3° 낮아요", "지금과 비슷해요". 와/과는 `label`의 끝소리로 고른다.
+    public func sentence(comparedTo label: String) -> String {
         if isSimilar {
-            return baseline == .yesterday ? "어제와 비슷해요" : "\(baseline.valueLabel)과 비슷해요"
+            return "\(Hangul.withAnd(label)) 비슷해요"
         }
-        return "\(baseline.valueLabel)보다 \(abs(degrees))° \(degrees < 0 ? "낮아요" : "높아요")"
+        return "\(label)보다 \(abs(degrees))° \(degrees < 0 ? "낮아요" : "높아요")"
     }
 
     /// 체감 표현. 비슷하면 nil. 오늘 기온에 따라 말을 바꾼다: 25° 이상은 더위("조금 덜 더워요"),
@@ -125,16 +130,13 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
     public let valueRange: ClosedRange<Double>
     public let headline: Headline?
 
-    /// 하루 최고·최저는 그 날 시간의 3/4 이상 값이 있을 때만 구한다
-    static let extremeCoverage = 0.75
-
     /// 지난 기온이 없거나, 오늘과 기준 날을 견줄 수 있는 시간이 하나도 없으면 nil
     public init?(place: TodayPlace, tz: String, now: Int, baseline: TemperatureBaseline) {
         guard let history = place.tempHistory else { return nil }
         let clock = LocalClock(tz: tz)
         let dayStart = clock.startOfDay(now)
         let dayEnd = clock.addingDays(1, to: dayStart)
-        let times = Array(stride(from: (dayStart + 3599) / 3600 * 3600, to: dayEnd, by: 3600))
+        let times = DayTemperature.hours(from: dayStart, to: dayEnd)
         // 기준 날마다, 오늘 각 시간과 같은 시계 시각의 기온
         let past = (1...baseline.days).map { day in
             times.map { history.temp(at: clock.addingDays(-day, to: $0)) }
@@ -152,14 +154,11 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
         }
         guard hours.contains(where: { $0.delta != nil }) else { return nil }
 
-        let needed = Int((Double(times.count) * Self.extremeCoverage).rounded(.up))
         func extreme(_ pick: ([Double]) -> Double?) -> Extreme? {
-            let todayValues = hours.compactMap(\.today)
-            guard todayValues.count >= needed, let value = pick(todayValues) else { return nil }
-            let perDay = past.compactMap { day -> Double? in
-                let values = day.compactMap { $0 }
-                return values.count >= needed ? pick(values) : nil
+            guard let value = DayTemperature.extreme(hours.map(\.today), hours: times.count, pick) else {
+                return nil
             }
+            let perDay = past.compactMap { DayTemperature.extreme($0, hours: times.count, pick) }
             guard !perDay.isEmpty else { return nil }
             return Extreme(today: value, baseline: perDay.reduce(0, +) / Double(perDay.count))
         }
@@ -181,6 +180,46 @@ public struct TemperatureComparisonModel: Sendable, Equatable {
             headline = Headline(subject: "최고 기온", delta: high.delta, text: high.delta.sentence(baseline))
         } else {
             headline = nil
+        }
+    }
+}
+
+/// 하루 시간별 기온에서 최고·최저 구하기 (기온 비교·여행이 함께 쓴다)
+enum DayTemperature {
+    /// 하루 최고·최저는 그 날 시간의 3/4 이상 값이 있을 때만 구한다
+    static let coverage = 0.75
+
+    /// 값이 있는 시간이 `hours`의 `coverage` 이상이면 `pick`(최고 또는 최저), 아니면 nil
+    static func extreme(_ values: [Double?], hours: Int, _ pick: ([Double]) -> Double?) -> Double? {
+        let known = values.compactMap { $0 }
+        let needed = Int((Double(hours) * coverage).rounded(.up))
+        return known.count >= needed ? pick(known) : nil
+    }
+
+    /// [start, end)의 정시들. 현지 자정이 정시가 아닌 곳(+5:30 등)은 다음 정시부터.
+    static func hours(from start: Int, to end: Int) -> [Int] {
+        Array(stride(from: (start + 3599) / 3600 * 3600, to: end, by: 3600))
+    }
+}
+
+/// 한글 조사 고르기
+enum Hangul {
+    /// "지금과", "어제와"
+    static func withAnd(_ word: String) -> String {
+        word + (hasFinalConsonant(word) ? "과" : "와")
+    }
+
+    /// 마지막 글자에 받침이 있는지. 숫자는 읽는 소리로 본다(1 "일", 3 "삼"). 그 밖의 글자는 받침 없음으로 본다.
+    static func hasFinalConsonant(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespaces).unicodeScalars.last else { return false }
+        switch last.value {
+        case 0xAC00...0xD7A3:
+            return (last.value - 0xAC00) % 28 != 0
+        case 0x30...0x39:
+            // 0 영, 1 일, 3 삼, 6 육, 7 칠, 8 팔
+            return [0, 1, 3, 6, 7, 8].contains(Int(last.value - 0x30))
+        default:
+            return false
         }
     }
 }

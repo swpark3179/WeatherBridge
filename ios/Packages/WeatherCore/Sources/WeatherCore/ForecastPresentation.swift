@@ -45,6 +45,16 @@ public struct LocalClock: Sendable {
         Int(calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(epoch))).timeIntervalSince1970)
     }
 
+    /// 그 시각의 현지 날짜
+    public func localDate(_ epoch: Int) -> LocalDate {
+        LocalDate(Date(timeIntervalSince1970: TimeInterval(epoch)), calendar: calendar)
+    }
+
+    /// 그 날짜의 현지 0시 (epoch 초)
+    public func startOfDay(_ date: LocalDate) -> Int {
+        Int(date.date(in: calendar).timeIntervalSince1970)
+    }
+
     /// `days`일 뒤(음수면 앞)의 같은 현지 시각. 서머타임이 바뀌는 날도 시계 시각을 맞춘다.
     public func addingDays(_ days: Int, to epoch: Int) -> Int {
         let date = Date(timeIntervalSince1970: TimeInterval(epoch))

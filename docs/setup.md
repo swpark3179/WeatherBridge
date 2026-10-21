@@ -71,8 +71,8 @@ select * from public.obs_log order by obs_time desc limit 5;
    - `@supabase/server`는 HS256 사용자 토큰을 거부합니다. 바꾸지 않으면 앱의 모든 `today` 호출이 401이 됩니다.
 2. **익명 로그인 켜기**: Authentication → Sign In / Providers → **Allow anonymous sign-ins** 켜기 → Save
    - 기본 제한은 IP당 시간당 30회입니다.
-3. 배포는 `Server deploy`가 합니다(마이그레이션 2개, `today`·`dispatch` 함수, 매분 cron).
-4. `Server smoke`는 매일 익명 사용자를 하나 만들어 앱 경로(장소 등록 → `today` → 알림 문구 미리 보기)를 점검하고 바로 지웁니다. Actions secret `SUPABASE_API_KEY`(publishable)를 씁니다.
+3. 배포는 `Server deploy`가 합니다(마이그레이션 2개, `today`·`dispatch` 함수, 매분 cron). Phase 5A의 `trips` 마이그레이션·함수도 같은 워크플로가 배포하며 따로 할 일은 없습니다.
+4. `Server smoke`는 매일 익명 사용자를 하나 만들어 앱 경로(장소 등록 → `today` → 알림 문구 미리 보기 → 여행 등록 → `trips` → 여행 삭제)를 점검하고 바로 지웁니다. Actions secret `SUPABASE_API_KEY`(publishable)를 씁니다.
 
 확인용 SQL
 ```sql
@@ -172,4 +172,4 @@ Profiles → **+** → Distribution의 **App Store Connect** → Continue
 |---|---|
 | Phase 3 | data.go.kr 한국천문연구원 특일정보(공휴일) 활용신청 |
 | Phase 4 | WeatherKit(위 .p8 키에 WeatherKit 서비스 추가), Tomorrow.io, WeatherAPI.com, OpenWeatherMap 키 |
-| Phase 5 | data.go.kr 기상청 중기예보 활용신청, Visual Crossing, Pirate Weather 키 |
+| Phase 5C | data.go.kr 기상청 중기예보 활용신청, Visual Crossing, Pirate Weather 키 (5A·5B는 새 키 없음) |

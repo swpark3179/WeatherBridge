@@ -93,6 +93,11 @@ export interface TodayResponse {
 
 const KIND_ORDER: Record<PlaceKind, number> = { home: 0, office: 1, trip: 2 };
 
+/** 지난 값도 주는 소스 (기온 비교·여행 기온은 이 모델들끼리만 평균한다) */
+export const OPEN_METEO_PROVIDERS: ReadonlySet<ProviderId> = new Set(
+  Object.values(OPEN_METEO_MODELS),
+);
+
 /** 장소별 예보를 캐시에서 꺼낸다(만료됐으면 새로 받음). 집, 회사 순서로 돌려준다. */
 export async function loadForecasts(deps: Deps, places: Place[]): Promise<LoadedPlace[]> {
   const sorted = [...places].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
@@ -107,18 +112,30 @@ export async function loadForecasts(deps: Deps, places: Place[]): Promise<Loaded
 /**
  * TEMP_HISTORY_DAYS일 전 현지 자정부터 오늘 자정까지의 시간별 기온(앞뒤 빈 시간은 잘라 낸다).
  * 지난 값도 주는 Open-Meteo 모델만 쓴다(기상청 단기예보는 지난 시간이 없다).
- * 한 소스라도 빠진 시간은 평균의 구성이 달라지므로 비워 둔다.
  */
 export function tempHistory(
   forecasts: ProviderForecast[],
   opts: { nowSec: number; tz: string },
 ): TempHistory | null {
   const today = localDateOf(opts.nowSec, opts.tz);
-  const from = Math.ceil(zonedEpoch(addDays(today, -TEMP_HISTORY_DAYS), 0, 0, opts.tz) / 3600) *
-    3600;
-  const to = zonedEpoch(addDays(today, 1), 0, 0, opts.tz);
-  const historic = new Set<ProviderId>(Object.values(OPEN_METEO_MODELS));
-  const series = forecasts.filter((f) => historic.has(f.provider)).map((f) => ({
+  return meanTempSeries(forecasts, {
+    from: zonedEpoch(addDays(today, -TEMP_HISTORY_DAYS), 0, 0, opts.tz),
+    to: zonedEpoch(addDays(today, 1), 0, 0, opts.tz),
+  });
+}
+
+/**
+ * [from, to)의 정시마다 Open-Meteo 모델 평균 기온(앞뒤 빈 시간은 잘라 낸다).
+ * 값이 가장 많은 모델의 TEMP_HISTORY_MIN_COVERAGE보다 적게 가진 모델은 뺀다.
+ * 한 소스라도 빠진 시간은 평균의 구성이 달라지므로 비워 둔다.
+ */
+export function meanTempSeries(
+  forecasts: ProviderForecast[],
+  range: { from: number; to: number },
+): TempHistory | null {
+  const from = Math.ceil(range.from / 3600) * 3600;
+  const to = range.to;
+  const series = forecasts.filter((f) => OPEN_METEO_PROVIDERS.has(f.provider)).map((f) => ({
     provider: f.provider,
     temps: new Map(
       f.slots.filter((s) => s.temp !== null && s.t >= from && s.t < to).map((s) => [s.t, s.temp!]),

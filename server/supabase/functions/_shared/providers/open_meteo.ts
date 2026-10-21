@@ -26,10 +26,11 @@ const HOUR = 3600;
 export const OPEN_METEO_PAST_DAYS = 8;
 
 /**
- * 앞으로 받을 날 수. 7일 보기(오늘 ~ 6일 뒤)를 채우려면, UTC 날짜 기준이라 서울 0–9시에도
- * 6일 뒤 현지 자정까지 닿도록 하루 더 받는다.
+ * 앞으로 받을 날 수. 여행 화면이 16일 뒤까지 쓰므로 Open-Meteo 최대치를 받는다(집도 여행 날짜에 닿아야 함).
+ * 실제로 닿는 범위는 모델마다 다르다: ICON 약 7.5일, ECMWF 약 15일, GFS 16일.
+ * 7일 보기(오늘 ~ 6일 뒤)는 UTC 날짜 기준으로도 8일이면 충분하다.
  */
-export const OPEN_METEO_FORECAST_DAYS = 8;
+export const OPEN_METEO_FORECAST_DAYS = 16;
 
 export function openMeteoForecastUrl(
   lat: number,
@@ -40,7 +41,7 @@ export function openMeteoForecastUrl(
   const params = new URLSearchParams({
     latitude: lat.toFixed(2),
     longitude: lon.toFixed(2),
-    hourly: "precipitation_probability,precipitation,temperature_2m",
+    hourly: "precipitation_probability,precipitation,temperature_2m,cloud_cover,snowfall",
     models: Object.keys(OPEN_METEO_MODELS).join(","),
     forecast_days: String(days),
     past_days: String(pastDays),
@@ -54,8 +55,8 @@ type Hourly = Record<string, Array<number | null>>;
 
 /**
  * 응답 → 모델별 예보.
- * Open-Meteo의 강수확률·강수량은 "직전 1시간" 값이라 시각 T의 값을 [T-1h, T) 슬롯에 넣는다.
- * 기온은 순간값이라 시각 그대로 쓴다.
+ * Open-Meteo의 강수확률·강수량·적설은 "직전 1시간" 값이라 시각 T의 값을 [T-1h, T) 슬롯에 넣는다.
+ * 기온·운량은 순간값이라 시각 그대로 쓴다.
  */
 export function parseOpenMeteo(body: unknown, fetchedAt: number): ProviderForecast[] {
   const hourly = (body as { hourly?: Hourly })?.hourly;
@@ -71,6 +72,8 @@ export function parseOpenMeteo(body: unknown, fetchedAt: number): ProviderForeca
     const pop = hourly[`precipitation_probability_${model}`] ?? [];
     const precip = hourly[`precipitation_${model}`] ?? [];
     const temp = hourly[`temperature_2m_${model}`] ?? [];
+    const cloud = hourly[`cloud_cover_${model}`] ?? [];
+    const snow = hourly[`snowfall_${model}`] ?? [];
     const slots: HourSlot[] = [];
     for (const t of times) {
       const end = index.get(t + HOUR);
@@ -81,6 +84,8 @@ export function parseOpenMeteo(body: unknown, fetchedAt: number): ProviderForeca
         span: 1,
         precipMm: precip[end] ?? null,
         temp: temp[index.get(t)!] ?? null,
+        cloud: round(cloud[index.get(t)!]),
+        snowCm: snow[end] ?? null,
       });
     }
     return {

@@ -78,17 +78,24 @@ export function kmaNcstBody(obsTime: number, values: Record<string, string>): st
 
 /**
  * Open-Meteo 응답 본문. pops[model][i]는 시각 times[i]의 값(= 직전 1시간 확률).
+ * 운량·적설은 extra로 줄 때만 싣는다(필드가 없던 옛 응답과 같은 모양).
  */
 export function openMeteoBody(
   times: number[],
   pops: Record<string, Array<number | null>>,
   temps?: Record<string, Array<number | null>>,
+  extra?: {
+    cloud?: Record<string, Array<number | null>>;
+    snow?: Record<string, Array<number | null>>;
+  },
 ): string {
   const hourly: Record<string, unknown> = { time: times };
   for (const [model, values] of Object.entries(pops)) {
     hourly[`precipitation_probability_${model}`] = values;
     hourly[`precipitation_${model}`] = values.map((v) => (v === null ? null : v >= 50 ? 1.2 : 0));
     hourly[`temperature_2m_${model}`] = temps?.[model] ?? values.map(() => 14);
+    if (extra?.cloud?.[model]) hourly[`cloud_cover_${model}`] = extra.cloud[model];
+    if (extra?.snow?.[model]) hourly[`snowfall_${model}`] = extra.snow[model];
   }
   return JSON.stringify({ latitude: 37.57, longitude: 126.98, utc_offset_seconds: 0, hourly });
 }

@@ -52,6 +52,13 @@ export function formatLocalDate(d: LocalDate): string {
   return `${d.year}-${p(d.month)}-${p(d.day)}`;
 }
 
+/** "YYYY-MM-DD" */
+export function parseLocalDate(value: string): LocalDate {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) throw new Error(`날짜 형식이 아닙니다: ${value}`);
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
 export function localDateOf(epochSec: number, tz: string): LocalDate {
   const { year, month, day } = zonedParts(epochSec, tz);
   return { year, month, day };

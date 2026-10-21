@@ -5,7 +5,7 @@
 - 핵심 기능
   1. 출근시간 T 기준 **T-60분 ~ T 동안 잠금화면 브리핑**(Live Activity). 오늘 집·회사 중 비 올 가능성이 있는 시간대가 있으면 강조.
   2. 지정 시각에 **집·회사 오늘 날씨 요약 알림**.
-  3. **여행 모드**: 기간·지역(국내/해외)을 등록하면 출발 전까지 예보 변화를 계속 추적. 출발일에는 집 날씨도 함께.
+  3. **여행 모드**: 기간·지역(국내/해외)을 등록하면 그 기간 여행지와 집의 날씨·기온을 보여주고(지금 = 집 최근 3일과 기온 비교), 출발 전까지 예보 변화를 계속 추적. 출발일에는 집 날씨도 함께.
   4. **다중 무료 날씨 소스 비교·종합**(시간대별 강수확률 중심).
 - 결정사항: **iOS 전용** / 경량 서버 / 여행지 국내+해외 / 개인·지인용 배포(스토어 공개 X) / 앱 ID `io.github.swpark3179.weatherbridge`.
 - 개발 환경: Mac 없음 → iOS 빌드·검증은 GitHub Actions macOS 러너, 실기기 설치는 Apple Developer 가입 후 CI 서명 + TestFlight. 세부 결정은 [decisions.md](decisions.md).
@@ -69,7 +69,8 @@ WeatherBridge/
 │        ├─ forecast/          장소별 종합 예보 (캐시만 읽음)
 │        ├─ briefing/          요약/출근 카드 가공
 │        ├─ dispatch/          cron 5분: 요약 알림·Live Activity 수명주기 발송
-│        └─ trip-watch/        여행 스냅샷·변화 감지·알림
+│        ├─ trips/             앱 여행 화면: 여행 날짜별 목적지·집 날씨 + 집의 지난 기온
+│        └─ trip-watch/        (5B) 여행 스냅샷·변화 감지·알림
 ├─ docs/
 └─ .github/workflows/
    ├─ ci.yml                   server(Deno) / core(swift test, Linux) / ios(xcodebuild, macOS)
@@ -80,13 +81,13 @@ WeatherBridge/
 ### 데이터 계약
 - Live Activity 페이로드(`CommuteActivityAttributes`, `CommuteState`)는 `WeatherCore`에 정의하고, 서버 `apns.ts`가 같은 키로 생성.
 - 계약 샘플 `ios/Packages/WeatherCore/Tests/WeatherCoreTests/Fixtures/live_activity_start.json`을 **서버 테스트(생성 결과와 일치)와 Swift 테스트(디코딩 가능)가 함께 검증**.
-- 앱 `today` 응답(`TodayResponse`)도 같은 방식: `Fixtures/today_response.json` (서버에서 `deno task fixtures`로 다시 만든다).
+- 앱 `today` 응답(`TodayResponse`)도 같은 방식: `Fixtures/today_response.json` (서버에서 `deno task fixtures`로 다시 만든다). 여행 화면 `trips` 응답(`TripsResponse`)은 `Fixtures/trips_response.json`.
 - 날짜는 epoch 초(Int)로 주고받음.
 
 ### 주요 테이블
 - `places`: kind(home/office/trip), lat/lon(약 1km로 스냅해 저장), IANA tz, kma_nx/ny, kma_mid_region
 - `schedules`: 출근시간(현지시각)+tz, 요일별 on/off, 요약 시각, 공휴일 건너뛰기, "오늘 건너뛰기/휴가" 기간
-- `trips`: place, 시작/종료일(목적지 기준), 출발 시각
+- `trips`: place(kind='trip' 장소, 지우면 함께 지워짐), 시작/종료일(목적지 달력 날짜, 31일까지). 쓰기는 `set_trip`·`delete_trip` RPC. (5B) 출발 시각
 - `devices`: apns_token, **apns_env**(sandbox/production), push-to-start 토큰, 브로드캐스트 채널 ID, 마지막 확인 시각
 - `forecast_cache`, `forecast_log`(소스별 예보 기록), `obs_log`(기상청 실황 RN1/PTY), `trip_snapshots`, `dispatch_log`(unique: user, kind, local_date), `quota_ledger`
 
@@ -153,7 +154,17 @@ WeatherBridge/
 3. 야간 실 API 스모크 테스트(소스별 응답 형식 변경 감지).
 
 ### Phase 5 — 여행 모드 (국내 → 해외)
-1. 여행 등록: 목적지 검색, 기간(목적지 tz 기준), 출발 시각. 출발일 판단은 집 tz 기준.
+세 번에 나눈다: **5A** 등록·여행 화면·집 대비 기온 비교(← 진행 중) / **5B** 재조회 주기·변화 추이·변화 알림·출발일 카드 / **5C** 어댑터.
+
+#### 5A — 여행 등록과 여행 화면 ([decisions.md](decisions.md) D23·D24)
+1. 여행 등록: 목적지 검색(국내·해외, 지도 결과의 시간대), 기간(목적지 달력 날짜, 31일까지). 사용자당 끝나지 않은 여행 10개. 고칠 때 다시 검색하지 않으면 목적지는 그대로.
+2. 서버 수집: Open-Meteo를 16일까지 받고(집도 여행 날짜까지 닿게) 운량·적설을 더한다. `refresh`는 끝나지 않았고 15일 안에 시작하는 여행 목적지만 매시 받고, 예보·실황 기록은 집·회사만 남긴다.
+3. `trips` 함수: 여행 날짜마다 목적지·집(같은 달력 날짜를 각자 시간대로)의 비 소식·낮 운량·적설·시간별 기온(그 날 끝까지 닿는 Open-Meteo 모델 평균)과 집의 지난 기온(모델별).
+4. **지금과 비교**: 지금 = 집의 최근 3일(어제·그제·3일 전) 하루 최고·최저 평균. 여행 날짜마다 최고는 최고끼리, 최저는 최저끼리 비교해 "지금보다 조금 추워요", "지금보다 일교차가 커요". 목적지와 집 모두에 적용하고, 기준은 그 날과 같은 예보 모델 묶음으로 만든다.
+5. 화면: 여행 탭(카드 목록, D-day·여행 중 배지, 날짜별 하늘·최고/최저) → 상세(날짜 카드를 가로로 넘기며 움직이는 날씨 장면 — 햇살·구름·비·눈 — 위에 최고·최저가 지금 값에서 그 날 값으로 굴러감, 시간별 기온 그래프와 지금 띠, 날짜별 최고·최저 막대). 동작 줄이기·저전력 모드에서는 멈춘 그림.
+
+#### 5B — 예보 변화 추적
+1. 출발 시각(출발일 판단은 집 tz 기준).
 2. `trip-watch` 재조회 주기
    - D-16~D-11: 1일 1회(Open-Meteo·Visual Crossing·WeatherKit 범위)
    - D-10~D-4: 1일 2회(국내는 기상청 중기 06/18시 발표 후)
@@ -161,7 +172,9 @@ WeatherBridge/
 3. `trip_snapshots`에 날짜·오전/오후별 종합 저장 → 상세 화면 **예보 변화 추이 그래프**("10/25 오후 30%→50%→70%").
 4. 변화 알림: 계열별로 감지, **등급이 바뀌고 ±20%p 이상 변화가 2회 연속**일 때만 APNs 발송, 여행당 하루 1회(D-1 예외).
 5. 출발일: 오늘 화면 상단 "출발일" 카드 — 집(출발 시각까지) + 목적지(도착 후) 시간별 동시 표시, 요약 알림에도 포함. 여행 기간 중 출근 브리핑·요약 일시중지 제안.
-6. 어댑터 추가: 기상청 중기(예보구역 코드 매핑), Visual Crossing, Pirate Weather. 해외는 현지시각 표시.
+
+#### 5C — 소스 추가
+1. 어댑터 추가: 기상청 중기(예보구역 코드 매핑), Visual Crossing, Pirate Weather. 해외는 현지시각 표시.
 
 ### Phase 6 — 고도화
 1. **정확도 기반 가중치**: `forecast_log` vs `obs_log`로 집·회사의 소스·계열별 Brier 점수(리드타임 구간별) → 가중치 자동 조정, 비교 화면에 "최근 30일 적중률".
@@ -181,4 +194,5 @@ WeatherBridge/
   - Phase 2: 지정 시각 ±1분 내 요약 알림 수신
   - Phase 3: T-60 잠금화면 표시 → 갱신 → T에 사라짐, 비 예보 시 강조, 공휴일·건너뛰기 시 미표시
   - Phase 4: 6개 이상 소스 비교 화면, 한도 초과 없음
-  - Phase 5: 여행 변화 추이 누적, 변화 알림 수신, 출발일 카드 표시
+  - Phase 5A: 여행 등록 → 여행 화면에 날짜별 목적지·집 날씨와 지금 대비 최고·최저, `Server smoke` 여행 흐름 녹색
+  - Phase 5B: 여행 변화 추이 누적, 변화 알림 수신, 출발일 카드 표시

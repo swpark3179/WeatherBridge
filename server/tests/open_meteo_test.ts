@@ -18,8 +18,12 @@ Deno.test("url requests three models in unix time, rounded to ~1km", () => {
   assertEquals(url.searchParams.get("timeformat"), "unixtime");
   // 기온 비교용 지난 값: 서울 7일 전 자정부터 채우려면 UTC로 8일
   assertEquals(url.searchParams.get("past_days"), "8");
-  // 7일 보기: UTC 날짜 기준이라 서울 6일 뒤 자정까지 닿으려면 8일
-  assertEquals(url.searchParams.get("forecast_days"), "8");
+  // 여행 화면: 16일 뒤까지 (7일 보기는 8일이면 충분)
+  assertEquals(url.searchParams.get("forecast_days"), "16");
+  assertEquals(
+    url.searchParams.get("hourly"),
+    "precipitation_probability,precipitation,temperature_2m,cloud_cover,snowfall",
+  );
 });
 
 Deno.test("preceding-hour values move to the slot that starts an hour earlier", () => {
@@ -54,6 +58,31 @@ Deno.test("preceding-hour values move to the slot that starts an hour earlier", 
   // 확률이 없어도 기온이 있으면 슬롯은 남는다
   assertEquals(icon.family, "dwd");
   assertEquals(icon.slots.map((s) => s.pop), [null, null, null]);
+});
+
+Deno.test("cloud cover stays at its hour; snowfall moves like precipitation", () => {
+  const body = JSON.parse(
+    openMeteoBody(
+      times,
+      { ecmwf_ifs025: [0, 60, 70, 80], ncep_gfs_seamless: [0, 0, 0, 0] },
+      undefined,
+      {
+        cloud: { ecmwf_ifs025: [10, 55.4, 90, 100] },
+        snow: { ecmwf_ifs025: [0, 0.7, 1.4, 0] },
+      },
+    ),
+  );
+  const [ecmwf, gfs] = parseOpenMeteo(body, T0);
+  assertEquals(ecmwf.slots.map((s) => [s.t - T0, s.cloud, s.snowCm]), [
+    [0, 10, 0.7],
+    [3600, 55, 1.4],
+    [7200, 90, 0],
+  ]);
+  // 운량·적설이 없는 응답이면 null
+  assertEquals(gfs.slots.map((s) => [s.cloud, s.snowCm]), [[null, null], [null, null], [
+    null,
+    null,
+  ]]);
 });
 
 Deno.test("error bodies raise ProviderError", async () => {
