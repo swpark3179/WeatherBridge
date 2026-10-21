@@ -98,6 +98,25 @@ public struct LocalClock: Sendable {
         Self.dayName(dayOffset(epoch, from: now))
     }
 
+    /// "월" … "일"
+    public func weekdayText(_ epoch: Int) -> String {
+        // Calendar 요일은 1=일요일 … 7=토요일
+        let names = ["일", "월", "화", "수", "목", "금", "토"]
+        return names[calendar.component(.weekday, from: Date(timeIntervalSince1970: TimeInterval(epoch))) - 1]
+    }
+
+    /// "10/23"
+    public func monthDayText(_ epoch: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(epoch))
+        return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
+    }
+
+    /// 7일 보기의 날짜 이름: "오늘", "내일", 그 뒤로는 요일("목")
+    public func weekDayLabel(_ epoch: Int, from now: Int) -> String {
+        let offset = dayOffset(epoch, from: now)
+        return offset < 2 ? Self.dayName(offset) : weekdayText(epoch)
+    }
+
     /// [from, to) 안에서 `days`(ISO 요일, 1=월 … 7=일) 날짜의 `time` 시각들
     public func occurrences(of time: ClockTime, days: [Int], from: Int, to: Int) -> [Int] {
         var result: [Int] = []
@@ -179,6 +198,13 @@ extension TodayPlace {
         return (low, high)
     }
 
+    /// 7일 보기: 오늘부터 최대 7일. 저장해 둔 지난 응답이면 이미 지난 날은 뺀다. 이전 서버의 응답이면 nil
+    public func upcomingDays(now: Int, tz: String) -> [TodayDay]? {
+        guard let days else { return nil }
+        let today = LocalClock(tz: tz).startOfDay(now)
+        return Array(days.filter { $0.date >= today }.prefix(7))
+    }
+
     private func dayPrefix(_ epoch: Int, now: Int, clock: LocalClock) -> String {
         clock.dayOffset(epoch, from: now) < 1 ? "" : "\(clock.dayLabel(epoch, from: now)) "
     }
@@ -219,12 +245,27 @@ extension TodayResponse {
                 rainy.append("\(place.name) \(spans.joined(separator: ", ")) 비")
             }
         }
-        if rainy.isEmpty {
-            let detail = dry.map { "\($0.name) 최대 \($0.maxPop)%" }.joined(separator: " · ")
-            return TodayOverview(headline: "앞으로 \(hours)시간 비 소식 없음", detail: detail.isEmpty ? nil : detail, isRainy: false)
+        return .summary(rainy: rainy, dry: dry, period: "\(hours)시간")
+    }
+
+    /// 7일 보기 맨 위 요약. 예: "집 내일·토 비 · 회사 토 비" + "…", "앞으로 7일 비 소식 없음" + "집 최대 25% · 회사 최대 20%"
+    public func weekOverview(now: Int) -> TodayOverview {
+        let clock = LocalClock(tz: tz)
+        var rainy: [String] = []
+        var dry: [(name: String, maxPop: Int)] = []
+        for place in places {
+            guard let days = place.upcomingDays(now: now, tz: tz), !days.isEmpty else { continue }
+            let rainyDays = days.filter(\.rainy)
+            if rainyDays.isEmpty {
+                dry.append((place.name, days.map(\.pop).max() ?? 0))
+            } else {
+                rainy.append("\(place.name) \(rainyDays.map { clock.weekDayLabel($0.date, from: now) }.joined(separator: "·")) 비")
+            }
         }
-        let detail = dry.map { "\($0.name) 비 소식 없음 (최대 \($0.maxPop)%)" }.joined(separator: " · ")
-        return TodayOverview(headline: rainy.joined(separator: " · "), detail: detail.isEmpty ? nil : detail, isRainy: true)
+        if rainy.isEmpty && dry.isEmpty {
+            return TodayOverview(headline: "7일 예보를 받는 중이에요", detail: "당겨서 새로고침해 주세요", isRainy: false)
+        }
+        return .summary(rainy: rainy, dry: dry, period: "7일")
     }
 }
 
@@ -232,6 +273,66 @@ public struct TodayOverview: Hashable, Sendable {
     public let headline: String
     public let detail: String?
     public let isRainy: Bool
+
+    /// 비 오는 장소를 모두 나열하고, 나머지는 최대 확률과 함께 덧붙인다
+    static func summary(rainy: [String], dry: [(name: String, maxPop: Int)], period: String) -> TodayOverview {
+        if rainy.isEmpty {
+            let detail = dry.map { "\($0.name) 최대 \($0.maxPop)%" }.joined(separator: " · ")
+            return TodayOverview(headline: "앞으로 \(period) 비 소식 없음", detail: detail.isEmpty ? nil : detail, isRainy: false)
+        }
+        let detail = dry.map { "\($0.name) 비 소식 없음 (최대 \($0.maxPop)%)" }.joined(separator: " · ")
+        return TodayOverview(headline: rainy.joined(separator: " · "), detail: detail.isEmpty ? nil : detail, isRainy: true)
+    }
+}
+
+/// 장소 카드의 7일 보기: 날짜마다 그 날 비가 오는지와 강수확률. 시간대는 보이지 않는다.
+public struct WeekRainModel: Sendable, Equatable {
+    public struct Row: Sendable, Equatable, Identifiable {
+        public var id: Int { date }
+        /// 현지 날짜의 0시 (epoch 초)
+        public let date: Int
+        /// "오늘", "내일", "목"
+        public let label: String
+        /// "10/23"
+        public let dateText: String
+        public let pop: Int
+        public let level: RainLevel
+        public let rainy: Bool
+        /// "예보 4개 중 3개"
+        public let agreement: String
+    }
+
+    public let rows: [Row]
+    /// 비 오는 날이 있으면 "내일 · 토", 없으면 "앞으로 7일 비 소식 없음". 날짜별 값을 받지 못했으면 nil
+    public let headline: String?
+    /// "가장 높을 때 토 70%"
+    public let detail: String?
+
+    public var rainyCount: Int { rows.filter(\.rainy).count }
+
+    public init(place: TodayPlace, tz: String, now: Int) {
+        let clock = LocalClock(tz: tz)
+        rows = (place.upcomingDays(now: now, tz: tz) ?? []).map { day in
+            Row(
+                date: day.date,
+                label: clock.weekDayLabel(day.date, from: now),
+                dateText: clock.monthDayText(day.date),
+                pop: day.pop,
+                level: day.level,
+                rainy: day.rainy,
+                agreement: "예보 \(day.total)개 중 \(day.agreeing)개"
+            )
+        }
+        // 같은 확률이면 이른 날
+        guard let peak = rows.max(by: { $0.pop < $1.pop }) else {
+            headline = nil
+            detail = nil
+            return
+        }
+        let rainy = rows.filter(\.rainy)
+        headline = rainy.isEmpty ? "앞으로 7일 비 소식 없음" : rainy.map(\.label).joined(separator: " · ")
+        detail = "가장 높을 때 \(peak.label) \(peak.pop)%"
+    }
 }
 
 /// 오늘 카드의 24시간 막대: 막대, 비 구간 괄호, 시각 눈금, 지금·자정·출근 위치.

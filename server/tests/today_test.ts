@@ -5,6 +5,7 @@ import type { ProviderForecast, ProviderId } from "../supabase/functions/_shared
 import { PROVIDER_FAMILY } from "../supabase/functions/_shared/forecast_types.ts";
 import {
   buildToday,
+  dailyRain,
   type LoadedPlace,
   loadForecasts,
   tempHistory,
@@ -61,22 +62,44 @@ function withYesterday(f: ProviderForecast, temps: number[]): ProviderForecast {
   return { ...f, slots: [...past, ...f.slots] };
 }
 
+/** 뒤 날짜 강수확률을 붙인다: [10/21부터 며칠째, 시, 강수확률] */
+function withLater(f: ProviderForecast, values: Array<[number, number, number]>): ProviderForecast {
+  const later = values.map(([day, hour, pop]) => ({
+    t: kst(2026, 10, 21 + day, hour),
+    pop,
+    span: 1,
+    precipMm: null,
+    temp: null,
+  }));
+  return { ...f, slots: [...f.slots, ...later] };
+}
+
 /**
  * 계약 샘플용 입력: 집은 08–10시 비, 회사는 비 소식 없음, 06시부터 4시간.
  * 집은 ECMWF에 어제 06–09시 기온도 있어 기온 비교가 된다(오늘이 2–3° 낮다).
+ * 집은 10/22까지 값이 있어 7일 보기가 3일치다. 기상청은 10/22 정오에 끝나 그 날에서 빠진다.
+ * 회사는 오늘 10시에 예보가 끝나 날짜별 값이 없다.
  */
 function sample(): LoadedPlace[] {
   return [
     {
       place: place("home", "집"),
       forecasts: [
-        fc("kma_short", [10, 20, 60, 70], [15, 16, 17, 17]),
+        withLater(fc("kma_short", [10, 20, 60, 70], [15, 16, 17, 17]), [
+          [0, 12, 30],
+          [0, 23, 0],
+          [1, 11, 80],
+        ]),
         withYesterday(
-          fc("om_ecmwf", [5, 30, 80, 90], [14.6, 15.2, 16.1, 16.4]),
+          withLater(fc("om_ecmwf", [5, 30, 80, 90], [14.6, 15.2, 16.1, 16.4]), [
+            [0, 15, 20],
+            [1, 14, 40],
+            [1, 23, 0],
+          ]),
           [17.1, 18.0, 19.2, 19.9],
         ),
-        fc("om_gfs", [0, 10, 40, 60]),
-        fc("om_icon", [0, 0, 20, 50]),
+        withLater(fc("om_gfs", [0, 10, 40, 60]), [[0, 9, 10], [1, 16, 70], [1, 23, 0]]),
+        withLater(fc("om_icon", [0, 0, 20, 50]), [[0, 18, 0], [1, 13, 20], [1, 23, 0]]),
       ],
       errors: [],
     },
@@ -237,4 +260,58 @@ Deno.test("today response carries the temperature history per place", () => {
   assertEquals(home.temps.slice(24), [14.6, 15.2, 16.1, 16.4]);
   // 회사는 Open-Meteo 기온이 없다
   assertEquals(r.places[1].tempHistory, null);
+});
+
+Deno.test("today response carries the daily rain per place", () => {
+  const r = buildToday(sample(), { nowSec: NOW, tz: "Asia/Seoul", threshold: 30, horizonHours: 4 });
+  assertEquals(r.places[0].days, [
+    // 오늘: 계열 최고 70·90·60·50 → (70×1.5 + 90 + 60 + 50) / 4.5
+    { date: kst(2026, 10, 20, 0), pop: 68, agreeing: 4, total: 4, rainy: true },
+    // 내일: 30·20·10·0 → 17%, 기준 이상은 기상청 하나
+    { date: kst(2026, 10, 21, 0), pop: 17, agreeing: 1, total: 4, rainy: false },
+    // 모레: 기상청(정오에 끝남)의 80%는 빼고 40·70·20
+    { date: kst(2026, 10, 22, 0), pop: 43, agreeing: 2, total: 3, rainy: true },
+  ]);
+  assertEquals(r.places[1].days, []);
+  // 날짜별 값은 시간별 범위(horizonHours)와 따로 계산한다
+  assertEquals(r.places[0].hours.length, 4);
+});
+
+/** 시각 → 강수확률 함수로 [from, to) 시간별 슬롯을 만든다 */
+function popSeries(
+  provider: ProviderId,
+  from: number,
+  to: number,
+  pop: (t: number) => number,
+): ProviderForecast {
+  const slots = [];
+  for (let t = from; t < to; t += H) {
+    slots.push({ t, pop: pop(t), span: 1, precipMm: 0, temp: null });
+  }
+  return { provider, family: PROVIDER_FAMILY[provider], issuedAt: T0, fetchedAt: T0, slots };
+}
+
+Deno.test("daily rain covers seven local days, today from the current hour", () => {
+  // 날마다 정오에 5%, 15% … 65%. 오늘 03시(이미 지난 시간)의 90%는 세지 않는다.
+  const noon = (i: number) => kst(2026, 10, 20 + i, 12);
+  const series = popSeries("om_ecmwf", kst(2026, 10, 20, 0), kst(2026, 10, 29, 0), (t) => {
+    if (t === kst(2026, 10, 20, 3)) return 90;
+    const i = [...Array(9).keys()].find((i) => noon(i) === t);
+    return i === undefined ? 0 : i * 10 + 5;
+  });
+  const days = dailyRain([series], { nowSec: NOW, tz: "Asia/Seoul", threshold: 30 });
+  assertEquals(days.map((d) => d.date), [...Array(7).keys()].map((i) => kst(2026, 10, 20 + i, 0)));
+  assertEquals(days.map((d) => d.pop), [5, 15, 25, 35, 45, 55, 65]);
+  assertEquals(days.map((d) => d.rainy), [false, false, false, true, true, true, true]);
+});
+
+Deno.test("daily rain splits days at local midnight across a DST change", () => {
+  // 뉴욕 10/30 10시(EDT). 11/1에 서머타임이 끝나 그 날은 25시간이다.
+  const now = Date.UTC(2026, 9, 30, 14) / 1000;
+  const series = popSeries("om_gfs", now - 10 * H, now + 9 * 24 * H, () => 10);
+  const days = dailyRain([series], { nowSec: now, tz: "America/New_York", threshold: 30 });
+  assertEquals(days.length, 7);
+  assertEquals(days[0].date, Date.UTC(2026, 9, 30, 4) / 1000);
+  assertEquals(days[2].date, Date.UTC(2026, 10, 1, 4) / 1000);
+  assertEquals(days[3].date, Date.UTC(2026, 10, 2, 5) / 1000);
 });

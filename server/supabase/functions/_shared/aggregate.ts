@@ -61,7 +61,69 @@ export interface Aggregate {
   highlight: boolean;
 }
 
+/** 하루(또는 남은 하루) 종합. 시간대 없이 그 날 비가 오는지만 본다. */
+export interface DayAgg {
+  /** 계열마다 그 날 가장 높은 강수확률을 가중 평균한 값. 쓸 예보가 없으면 null */
+  pop: number | null;
+  /** 그 날 최고값이 임계값 이상인 계열 수 / 참여 계열 수 */
+  agreeing: number;
+  total: number;
+  rainy: boolean;
+}
+
 const TEMP_PRIORITY: Family[] = ["kma", "ecmwf", "dwd", "ncep"];
+
+/** 종합 확률이 임계값 이상이거나, 기상청 또는 두 계열 이상이 강하게 비를 예보 */
+function isRainy(
+  consensus: number,
+  families: Partial<Record<Family, number>>,
+  threshold: number,
+): boolean {
+  const strong = Object.values(families).filter((v) => v >= STRONG_POP).length;
+  return consensus >= threshold || (families.kma ?? 0) >= STRONG_POP || strong >= 2;
+}
+
+function weightedConsensus(entries: [Family, number][]): number {
+  const weightSum = entries.reduce((a, [f]) => a + FAMILY_WEIGHTS[f], 0);
+  return Math.round(entries.reduce((a, [f, v]) => a + v * FAMILY_WEIGHTS[f], 0) / weightSum);
+}
+
+/**
+ * [from, to) 하루 종합: 계열마다 그 날 최고 강수확률을 구해 계열 간 가중 평균한다.
+ * 예보끼리 비 오는 시각이 어긋나도 "그 날 비"가 희석되지 않는다(시간별 종합의 최고값보다 높을 수 있다).
+ * - 구간 끝(to)까지 닿는 예보만 쓴다. 중간에 끝나는 예보의 반나절 최고값은 그 날 값이 아니다.
+ * - 기상청 연장구간(3시간 구간 확률)도 쓴다. 구간 확률은 구간·하루 단위 종합에는 쓸 수 있다.
+ */
+export function aggregateDay(
+  forecasts: ProviderForecast[],
+  opts: { from: number; to: number; threshold?: number },
+): DayAgg {
+  const threshold = opts.threshold ?? 30;
+  const maxByFamily = new Map<Family, number[]>();
+  for (const f of forecasts) {
+    const known = f.slots.filter((s) => s.pop !== null);
+    const reach = Math.max(-Infinity, ...known.map((s) => s.t + s.span * 3600));
+    if (reach < opts.to) continue;
+    const pops = known.filter((s) => s.t >= opts.from && s.t < opts.to).map((s) => s.pop!);
+    if (pops.length === 0) continue;
+    maxByFamily.set(f.family, [...(maxByFamily.get(f.family) ?? []), Math.max(...pops)]);
+  }
+
+  const families: Partial<Record<Family, number>> = {};
+  for (const [family, values] of maxByFamily) {
+    families[family] = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  }
+  const entries = Object.entries(families) as [Family, number][];
+  if (entries.length === 0) return { pop: null, agreeing: 0, total: 0, rainy: false };
+
+  const pop = weightedConsensus(entries);
+  return {
+    pop,
+    agreeing: entries.filter(([, v]) => v >= threshold).length,
+    total: entries.length,
+    rainy: isRainy(pop, families, threshold),
+  };
+}
 
 export function aggregate(
   forecasts: ProviderForecast[],
@@ -123,15 +185,11 @@ export function aggregate(
       continue;
     }
 
-    const weightSum = entries.reduce((a, [f]) => a + FAMILY_WEIGHTS[f], 0);
-    const consensus = Math.round(
-      entries.reduce((a, [f, v]) => a + v * FAMILY_WEIGHTS[f], 0) / weightSum,
-    );
+    const consensus = weightedConsensus(entries);
     const values = entries.map(([, v]) => v);
     const min = Math.min(...values);
     const max = Math.max(...values);
-    const strong = values.filter((v) => v >= STRONG_POP).length;
-    const rainy = consensus >= threshold || (families.kma ?? 0) >= STRONG_POP || strong >= 2;
+    const rainy = isRainy(consensus, families, threshold);
 
     hours.push({
       t,

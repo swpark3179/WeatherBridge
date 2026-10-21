@@ -1,10 +1,18 @@
 import SwiftUI
 import WeatherCore
 
-/// 오늘 화면: 맨 위에 한 줄 요약, 아래에 집·회사 카드(앞으로 24시간). 카드를 누르면 비 상세로 간다.
+/// 비 소식 범위: 앞으로 24시간(시간별) 또는 7일(날짜별)
+enum RainRange: String {
+    case day, week
+}
+
+/// 오늘 화면: 맨 위에 한 줄 요약, 범위 선택(24시간·7일), 아래에 집·회사 카드. 카드를 누르면 비 상세로 간다.
 struct TodayView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var cardTransition
+    /// 장면 상태로만 기억한다 (UserDefaults는 쓰지 않는다 — TodayCache 참고)
+    @SceneStorage("rainRange") private var range: RainRange = .day
 
     var body: some View {
         NavigationStack {
@@ -12,13 +20,19 @@ struct TodayView: View {
                 VStack(spacing: 16) {
                     if let today = model.today {
                         let now = Int(Date().timeIntervalSince1970)
-                        OverviewHeader(today: today, now: now, isCached: model.todayIsCached)
+                        OverviewHeader(today: today, now: now, isCached: model.todayIsCached, range: range)
+                        Picker("비 소식 범위", selection: $range) {
+                            Text("24시간").tag(RainRange.day)
+                            Text("7일").tag(RainRange.week)
+                        }
+                        .pickerStyle(.segmented)
                         ForEach(today.places) { place in
                             PlaceCard(
                                 place: place,
                                 tz: today.tz,
                                 now: now,
                                 commuteTimes: model.commuteTimes(tz: today.tz, now: now),
+                                range: range,
                                 zoomNamespace: cardTransition
                             )
                         }
@@ -35,6 +49,7 @@ struct TodayView: View {
                     }
                 }
                 .padding()
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.32), value: range)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("오늘")
@@ -58,14 +73,15 @@ struct RainDetailRoute: Hashable {
     let window: Int
 }
 
-/// 맨 위 요약: 비 오는 장소와 시간을 모두 나열한다
+/// 맨 위 요약: 비 오는 장소와 시간(7일 보기면 날짜)을 모두 나열한다
 private struct OverviewHeader: View {
     let today: TodayResponse
     let now: Int
     let isCached: Bool
+    let range: RainRange
 
     var body: some View {
-        let overview = today.overview(now: now)
+        let overview = range == .week ? today.weekOverview(now: now) : today.overview(now: now)
         let tint = overview.isRainy ? Color.blue : Color.orange
         HStack(spacing: 12) {
             Image(systemName: overview.isRainy ? "umbrella.fill" : "sun.max.fill")
@@ -98,12 +114,14 @@ private struct OverviewHeader: View {
 }
 
 /// 장소 카드: 다음 비 시각(크게), 비 구간 칩, 24시간 막대와 시각 눈금. 누르면 비 상세.
+/// 7일 보기에서는 그 대신 비 오는 날과 날짜별 강수확률을 보여 준다.
 /// 맨 아래 줄은 어제 같은 시각과의 기온 차이이고, 누르면 기온 비교.
 private struct PlaceCard: View {
     let place: TodayPlace
     let tz: String
     let now: Int
     let commuteTimes: [Int]
+    let range: RainRange
     let zoomNamespace: Namespace.ID
 
     @EnvironmentObject private var model: AppModel
@@ -119,19 +137,24 @@ private struct PlaceCard: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 header
-                NavigationLink(value: route) {
-                    headline(windows: windows, index: index)
+                switch range {
+                case .day:
+                    NavigationLink(value: route) {
+                        headline(windows: windows, index: index)
+                    }
+                    .buttonStyle(.plain)
+                    if windows.count > 1 {
+                        chips(windows: windows, index: index)
+                    }
+                    RainTimelineView(
+                        model: RainTimelineModel(place: place, tz: tz, now: now, commuteTimes: commuteTimes),
+                        selectedWindow: windows.isEmpty ? nil : index
+                    )
+                    .accessibilityLabel(timelineDescription(windows))
+                    splitNote
+                case .week:
+                    weekSection(WeekRainModel(place: place, tz: tz, now: now))
                 }
-                .buttonStyle(.plain)
-                if windows.count > 1 {
-                    chips(windows: windows, index: index)
-                }
-                RainTimelineView(
-                    model: RainTimelineModel(place: place, tz: tz, now: now, commuteTimes: commuteTimes),
-                    selectedWindow: windows.isEmpty ? nil : index
-                )
-                .accessibilityLabel(timelineDescription(windows))
-                splitNote
                 if !place.errors.isEmpty {
                     Label("일부 예보를 받지 못해 나머지로 계산했어요.", systemImage: "exclamationmark.circle")
                         .font(.caption)
@@ -224,6 +247,38 @@ private struct PlaceCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+        }
+    }
+
+    /// 7일 보기: 비 오는 날(크게)과 날짜별 줄. 날짜별 값을 아직 받지 못했으면(이전 서버·저장된 예보) 안내
+    @ViewBuilder
+    private func weekSection(_ week: WeekRainModel) -> some View {
+        if let headline = week.headline {
+            VStack(alignment: .leading, spacing: 2) {
+                if week.rainyCount > 0 {
+                    Text("7일 중 비 오는 날 \(week.rainyCount)일")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    Text(headline)
+                        .font(.title2.weight(.semibold))
+                } else {
+                    Text(headline)
+                        .font(.title3.weight(.semibold))
+                }
+                if let detail = week.detail {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            WeekRainView(model: week)
+        } else {
+            Label("7일 예보를 받는 중이에요. 당겨서 새로고침해 주세요.", systemImage: "calendar")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

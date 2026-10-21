@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { aggregate, rainLevel } from "../supabase/functions/_shared/aggregate.ts";
+import { aggregate, aggregateDay, rainLevel } from "../supabase/functions/_shared/aggregate.ts";
 import type {
   HourSlot,
   ProviderForecast,
@@ -130,4 +130,57 @@ Deno.test("slots outside the range are ignored", () => {
   const r = aggregate([fc("om_ecmwf", [90, 90, 90])], { from: T0 + H, to: T0 + 2 * H });
   assertEquals(r.hours.length, 1);
   assertEquals(r.hours[0].t, T0 + H);
+});
+
+Deno.test("a day takes each family's peak, so rain at different hours is not diluted", () => {
+  // ECMWF는 오전, GFS는 오후에 비. 시간별 종합은 어느 시간도 30%를 넘지 않는다.
+  const forecasts = [
+    fc("om_ecmwf", [0, 60, 0, 0, 0, 0]),
+    fc("om_gfs", [0, 0, 0, 0, 60, 0]),
+  ];
+  assertEquals(aggregate(forecasts, range(6)).maxPop, 30);
+  assertEquals(aggregateDay(forecasts, range(6)), { pop: 60, agreeing: 2, total: 2, rainy: true });
+});
+
+Deno.test("a day weights KMA 1.5 and uses the hourly rain rule", () => {
+  const day = aggregateDay(
+    [fc("kma_short", [10, 60]), fc("om_ecmwf", [0, 0]), fc("om_gfs", [0, 0])],
+    range(2),
+  );
+  // (60×1.5 + 0 + 0) / 3.5 = 26 → 기준 미만이지만 기상청 60%라 비
+  assertEquals(day, { pop: 26, agreeing: 1, total: 3, rainy: true });
+  assertEquals(
+    aggregateDay([fc("om_ecmwf", [10, 20]), fc("om_gfs", [0, 0])], range(2)),
+    { pop: 10, agreeing: 0, total: 2, rainy: false },
+  );
+});
+
+Deno.test("a day skips forecasts that end before the day does", () => {
+  // 기상청은 둘째 시간까지만 있어 셋째 시간까지인 하루에는 빠진다
+  const day = aggregateDay([fc("kma_short", [0, 90]), fc("om_ecmwf", [0, 10, 20])], range(3));
+  assertEquals(day, { pop: 20, agreeing: 0, total: 1, rainy: false });
+  // 다음 날까지 이어지는 예보는 그 날 끝까지 닿는다
+  assertEquals(aggregateDay([fc("om_ecmwf", [0, 10, 20, 0])], range(3)).total, 1);
+});
+
+Deno.test("a day counts KMA 3-hour block probabilities up to their end", () => {
+  // 연장구간: T0+H부터 3시간 구간 확률 → T0+4H까지 닿는다
+  const kma: ProviderForecast = {
+    ...fc("kma_short", []),
+    slots: [
+      { t: T0, pop: 10, span: 1, precipMm: null, temp: null },
+      { t: T0 + H, pop: 70, span: 3, precipMm: null, temp: null },
+    ],
+  };
+  assertEquals(aggregateDay([kma], range(4)), { pop: 70, agreeing: 1, total: 1, rainy: true });
+});
+
+Deno.test("a day without usable forecasts has no value", () => {
+  assertEquals(aggregateDay([fc("om_ecmwf", [null, null])], range(2)), {
+    pop: null,
+    agreeing: 0,
+    total: 0,
+    rainy: false,
+  });
+  assertEquals(aggregateDay([], range(2)).pop, null);
 });

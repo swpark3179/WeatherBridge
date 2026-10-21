@@ -4,7 +4,7 @@
  * ios/Packages/WeatherCore/Tests/WeatherCoreTests/Fixtures/today_response.json을 양쪽 테스트가 검증한다.
  * 좌표는 싣지 않는다.
  */
-import { aggregate, type RainWindow } from "./aggregate.ts";
+import { aggregate, aggregateDay, type RainWindow } from "./aggregate.ts";
 import { type Briefing, buildBriefing, restOfLocalDay } from "./briefing.ts";
 import type { Place, PlaceKind } from "./db.ts";
 import { type Deps, ensureForecasts } from "./forecast_service.ts";
@@ -18,6 +18,8 @@ const HORIZON_HOURS = 48;
 export const TEMP_HISTORY_DAYS = 7;
 /** 값이 가장 많은 소스의 이 비율보다 적게 가진 소스는 기온 평균에서 뺀다 */
 const TEMP_HISTORY_MIN_COVERAGE = 0.9;
+/** 7일 보기: 오늘부터 실을 현지 날짜 수 */
+export const DAILY_DAYS = 7;
 
 export interface LoadedPlace {
   place: Place;
@@ -51,6 +53,19 @@ export interface TodayPlace {
   errors: string[];
   /** 기온 비교용 시간별 기온. 지난 값을 주는 소스가 없으면 null */
   tempHistory: TempHistory | null;
+  /** 7일 보기: 오늘부터 날짜별 비 소식. 쓸 예보가 없는 날은 빠진다 */
+  days: TodayDay[];
+}
+
+/** 하루 비 소식 (aggregate.ts aggregateDay). 시간대 없이 그 날 비가 오는지만 본다. */
+export interface TodayDay {
+  /** 현지 날짜의 0시 (epoch 초). 오늘은 지금 시각이 속한 시간부터 계산한다 */
+  date: number;
+  /** 계열마다 그 날 가장 높은 강수확률의 가중 평균 */
+  pop: number;
+  agreeing: number;
+  total: number;
+  rainy: boolean;
 }
 
 /**
@@ -132,6 +147,27 @@ export function tempHistory(
   };
 }
 
+/** 오늘부터 DAILY_DAYS개 현지 날짜의 비 소식. 오늘은 지금 시각이 속한 시간부터 자정까지 본다. */
+export function dailyRain(
+  forecasts: ProviderForecast[],
+  opts: { nowSec: number; tz: string; threshold: number },
+): TodayDay[] {
+  const today = localDateOf(opts.nowSec, opts.tz);
+  const days: TodayDay[] = [];
+  for (let i = 0; i < DAILY_DAYS; i++) {
+    const date = zonedEpoch(addDays(today, i), 0, 0, opts.tz);
+    const from = i === 0 ? Math.floor(opts.nowSec / 3600) * 3600 : date;
+    const to = zonedEpoch(addDays(today, i + 1), 0, 0, opts.tz);
+    const { pop, agreeing, total, rainy } = aggregateDay(forecasts, {
+      from,
+      to,
+      threshold: opts.threshold,
+    });
+    if (pop !== null) days.push({ date, pop, agreeing, total, rainy });
+  }
+  return days;
+}
+
 /** 오늘 남은 시간 브리핑 (요약 알림 문구) */
 export function userBriefing(
   loaded: LoadedPlace[],
@@ -190,6 +226,7 @@ export function buildToday(
         })),
         errors,
         tempHistory: tempHistory(forecasts, opts),
+        days: dailyRain(forecasts, opts),
       };
     }),
   };

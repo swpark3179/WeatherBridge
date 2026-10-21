@@ -42,6 +42,20 @@ import Testing
         #expect(seoul.dayLabel(t + 40 * 3600, from: t) == "모레")
     }
 
+    @Test func weekdayAndDateTexts() {
+        let seoul = LocalClock(tz: "Asia/Seoul")
+        let t = 1_792_450_800 // 2026-10-20(화) 08:00 KST
+        #expect(seoul.weekdayText(t) == "화")
+        #expect(seoul.weekdayText(t + 5 * 86400) == "일")
+        #expect(seoul.monthDayText(t) == "10/20")
+        #expect(seoul.monthDayText(t + 12 * 86400) == "11/1")
+        #expect(seoul.weekDayLabel(t, from: t) == "오늘")
+        #expect(seoul.weekDayLabel(t + 86400, from: t) == "내일")
+        #expect(seoul.weekDayLabel(t + 2 * 86400, from: t) == "목")
+        // 16시간 뒤는 다음 날 0시
+        #expect(seoul.weekDayLabel(t + 16 * 3600, from: t) == "내일")
+    }
+
     @Test func commuteOccurrencesFollowWeekdays() {
         let seoul = LocalClock(tz: "Asia/Seoul")
         let t = 1_792_450_800 // 화요일 08:00
@@ -103,6 +117,75 @@ import Testing
         #expect(dry.headline == "앞으로 24시간 비 소식 없음")
         #expect(dry.detail == "집 최대 68% · 회사 최대 9%")
         #expect(!dry.isRainy)
+    }
+
+    @Test func weekModelShowsWhetherEachDayIsRainy() throws {
+        let today = try fixture()
+        let now = today.generatedAt // 10/20(화) 06:10
+        let week = WeekRainModel(place: today.places[0], tz: today.tz, now: now)
+        #expect(week.rows.map(\.label) == ["오늘", "내일", "목"])
+        #expect(week.rows.map(\.dateText) == ["10/20", "10/21", "10/22"])
+        #expect(week.rows.map(\.pop) == [68, 17, 43])
+        #expect(week.rows.map(\.level) == [.high, .clear, .moderate])
+        #expect(week.rows.map(\.agreement) == ["예보 4개 중 4개", "예보 4개 중 1개", "예보 3개 중 2개"])
+        #expect(week.rainyCount == 2)
+        #expect(week.headline == "오늘 · 목")
+        #expect(week.detail == "가장 높을 때 오늘 68%")
+
+        // 하루 뒤 저장된 응답을 보면 지난 날은 빠지고 이름이 하루씩 당겨진다
+        let tomorrow = WeekRainModel(place: today.places[0], tz: today.tz, now: now + 86400)
+        #expect(tomorrow.rows.map(\.label) == ["오늘", "내일"])
+        #expect(tomorrow.headline == "내일")
+        #expect(tomorrow.detail == "가장 높을 때 내일 43%")
+    }
+
+    @Test func weekModelWithoutRainOrDays() throws {
+        let today = try fixture()
+        var home = today.places[0]
+        home.days = home.days?.map { day in
+            var dry = day
+            dry.rainy = false
+            return dry
+        }
+        let dry = WeekRainModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(dry.rainyCount == 0)
+        #expect(dry.headline == "앞으로 7일 비 소식 없음")
+        #expect(dry.detail == "가장 높을 때 오늘 68%")
+
+        // 회사는 날짜별 값이 없고, 이전 서버의 응답이면 days가 nil이다
+        #expect(WeekRainModel(place: today.places[1], tz: today.tz, now: today.generatedAt).headline == nil)
+        home.days = nil
+        let missing = WeekRainModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(missing.rows.isEmpty)
+        #expect(missing.headline == nil)
+        #expect(home.upcomingDays(now: today.generatedAt, tz: today.tz) == nil)
+    }
+
+    @Test func weekOverviewListsRainyDaysPerPlace() throws {
+        var today = try fixture()
+        let now = today.generatedAt
+        // 회사는 날짜별 값이 없어 빠진다
+        let rainy = today.weekOverview(now: now)
+        #expect(rainy.headline == "집 오늘·목 비")
+        #expect(rainy.detail == nil)
+        #expect(rainy.isRainy)
+
+        let tomorrow = try #require(today.places[0].days?[1].date)
+        today.places[1].days = [TodayDay(date: tomorrow, pop: 12, agreeing: 0, total: 3, rainy: false)]
+        #expect(today.weekOverview(now: now).detail == "회사 비 소식 없음 (최대 12%)")
+
+        today.places[0].days = today.places[0].days?.map { day in
+            var dry = day
+            dry.rainy = false
+            return dry
+        }
+        let dry = today.weekOverview(now: now)
+        #expect(dry.headline == "앞으로 7일 비 소식 없음")
+        #expect(dry.detail == "집 최대 68% · 회사 최대 12%")
+        #expect(!dry.isRainy)
+
+        for index in today.places.indices { today.places[index].days = nil }
+        #expect(today.weekOverview(now: now).headline == "7일 예보를 받는 중이에요")
     }
 
     @Test func timelinePlacesBracketsTicksAndMarkers() throws {
