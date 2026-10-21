@@ -9,9 +9,15 @@ import { type Briefing, buildBriefing, restOfLocalDay } from "./briefing.ts";
 import type { Place, PlaceKind } from "./db.ts";
 import { type Deps, ensureForecasts } from "./forecast_service.ts";
 import type { Family, ProviderForecast, ProviderId } from "./forecast_types.ts";
+import { OPEN_METEO_MODELS } from "./providers/open_meteo.ts";
+import { addDays, localDateOf, zonedEpoch } from "./schedule.ts";
 
 export const DEFAULT_THRESHOLD = 30;
 const HORIZON_HOURS = 48;
+/** 기온 비교에 싣는 지난 날 수 (어제 ~ 7일 전) */
+export const TEMP_HISTORY_DAYS = 7;
+/** 값이 가장 많은 소스의 이 비율보다 적게 가진 소스는 기온 평균에서 뺀다 */
+const TEMP_HISTORY_MIN_COVERAGE = 0.9;
 
 export interface LoadedPlace {
   place: Place;
@@ -43,6 +49,21 @@ export interface TodayPlace {
   hours: TodayHour[];
   sources: Array<{ provider: ProviderId; family: Family; issuedAt: number; fetchedAt: number }>;
   errors: string[];
+  /** 기온 비교용 시간별 기온. 지난 값을 주는 소스가 없으면 null */
+  tempHistory: TempHistory | null;
+}
+
+/**
+ * 지난 며칠과 오늘의 시간별 기온. 앱이 오늘 기온을 어제·최근 며칠의 같은 시각과 비교한다.
+ * 모든 시간이 같은 소스 묶음의 평균이라, 소스마다 다른 치우침(격자·고도)이 날짜 간 차이에서 빠진다.
+ */
+export interface TempHistory {
+  /** 평균에 쓴 소스 */
+  providers: ProviderId[];
+  /** 첫 값의 시각 (epoch 초, UTC 정시) */
+  start: number;
+  /** start부터 1시간 간격 기온(°C, 소수 첫째 자리). 값이 없는 시간은 null */
+  temps: Array<number | null>;
 }
 
 export interface TodayResponse {
@@ -66,6 +87,49 @@ export async function loadForecasts(deps: Deps, places: Place[]): Promise<Loaded
     loaded.push({ place, forecasts, errors });
   }
   return loaded;
+}
+
+/**
+ * TEMP_HISTORY_DAYS일 전 현지 자정부터 오늘 자정까지의 시간별 기온(앞뒤 빈 시간은 잘라 낸다).
+ * 지난 값도 주는 Open-Meteo 모델만 쓴다(기상청 단기예보는 지난 시간이 없다).
+ * 한 소스라도 빠진 시간은 평균의 구성이 달라지므로 비워 둔다.
+ */
+export function tempHistory(
+  forecasts: ProviderForecast[],
+  opts: { nowSec: number; tz: string },
+): TempHistory | null {
+  const today = localDateOf(opts.nowSec, opts.tz);
+  const from = Math.ceil(zonedEpoch(addDays(today, -TEMP_HISTORY_DAYS), 0, 0, opts.tz) / 3600) *
+    3600;
+  const to = zonedEpoch(addDays(today, 1), 0, 0, opts.tz);
+  const historic = new Set<ProviderId>(Object.values(OPEN_METEO_MODELS));
+  const series = forecasts.filter((f) => historic.has(f.provider)).map((f) => ({
+    provider: f.provider,
+    temps: new Map(
+      f.slots.filter((s) => s.temp !== null && s.t >= from && s.t < to).map((s) => [s.t, s.temp!]),
+    ),
+  }));
+  const most = Math.max(0, ...series.map((s) => s.temps.size));
+  if (most === 0) return null;
+  const used = series.filter((s) => s.temps.size >= most * TEMP_HISTORY_MIN_COVERAGE);
+
+  const temps: Array<number | null> = [];
+  for (let t = from; t < to; t += 3600) {
+    const values = used.map((s) => s.temps.get(t));
+    temps.push(
+      values.every((v) => v !== undefined)
+        ? Math.round(values.reduce((a, b) => a + b!, 0) / values.length * 10) / 10
+        : null,
+    );
+  }
+  const first = temps.findIndex((v) => v !== null);
+  if (first < 0) return null;
+  const last = temps.findLastIndex((v) => v !== null);
+  return {
+    providers: used.map((s) => s.provider),
+    start: from + first * 3600,
+    temps: temps.slice(first, last + 1),
+  };
 }
 
 /** 오늘 남은 시간 브리핑 (요약 알림 문구) */
@@ -125,6 +189,7 @@ export function buildToday(
           fetchedAt: f.fetchedAt,
         })),
         errors,
+        tempHistory: tempHistory(forecasts, opts),
       };
     }),
   };

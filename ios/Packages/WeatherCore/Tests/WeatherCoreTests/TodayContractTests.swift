@@ -30,10 +30,26 @@ import Testing
         #expect(home.hours[2].split)
         #expect(home.hours[3].level == .high)
 
+        #expect(home.tempHistory?.providers == ["om_ecmwf"])
+        #expect(home.tempHistory?.temps.count == 28)
+
         let office = today.places[1]
         #expect(!office.highlight)
         #expect(office.errors == ["om_icon: timeout"])
         #expect(office.hours[0].families["dwd"] == nil)
+        #expect(office.tempHistory == nil)
+    }
+
+    /// 기온 비교 이전 서버의 응답(또는 저장해 둔 응답)에는 tempHistory가 없다
+    @Test func decodesResponsesWithoutTemperatureHistory() throws {
+        var today = try loadFixture()
+        for index in today.places.indices {
+            today.places[index].tempHistory = nil
+        }
+        let data = try JSONEncoder().encode(today)
+        #expect(!String(decoding: data, as: UTF8.self).contains("tempHistory"))
+        let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
+        #expect(decoded.places.allSatisfy { $0.tempHistory == nil })
     }
 
     @Test func briefingMatchesLiveActivityState() throws {

@@ -42,6 +42,26 @@ public struct TodayPlace: Codable, Hashable, Sendable, Identifiable {
     public var sources: [ForecastSource]
     /// 일부 소스를 받지 못했을 때의 메시지 (나머지 소스로 계산한 결과는 그대로 쓴다)
     public var errors: [String]
+    /// 기온 비교용 지난 며칠 ~ 오늘의 시간별 기온. 지난 값을 주는 소스가 없거나 이전 서버면 nil
+    public var tempHistory: TemperatureHistory?
+}
+
+/// 7일 전 현지 자정부터 오늘 자정까지의 시간별 기온 (앞뒤 빈 시간은 서버가 잘라 낸다).
+/// 모든 시간이 같은 예보 묶음의 평균이라, 날짜끼리 빼면 예보마다 다른 치우침이 빠진다.
+public struct TemperatureHistory: Codable, Hashable, Sendable {
+    /// 평균에 쓴 소스: "om_ecmwf", "om_gfs", "om_icon"
+    public var providers: [String]
+    /// 첫 값의 시각 (epoch 초, UTC 정시)
+    public var start: Int
+    /// `start`부터 1시간 간격 기온(°C). 값이 없는 시간은 nil
+    public var temps: [Double?]
+
+    /// 그 시각이 속한 시간의 기온
+    public func temp(at epoch: Int) -> Double? {
+        let offset = epoch - start
+        guard offset >= 0, temps.indices.contains(offset / 3600) else { return nil }
+        return temps[offset / 3600]
+    }
 }
 
 /// 연속된 비 시간

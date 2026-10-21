@@ -43,6 +43,10 @@ struct TodayView: View {
                 RainDetailView(route: route)
                     .navigationTransition(.zoom(sourceID: route.placeID, in: cardTransition))
             }
+            .navigationDestination(for: TemperatureRoute.self) { route in
+                TemperatureCompareView(route: route)
+                    .navigationTransition(.zoom(sourceID: route.placeID, in: cardTransition))
+            }
         }
     }
 }
@@ -94,6 +98,7 @@ private struct OverviewHeader: View {
 }
 
 /// 장소 카드: 다음 비 시각(크게), 비 구간 칩, 24시간 막대와 시각 눈금. 누르면 비 상세.
+/// 맨 아래 줄은 어제 같은 시각과의 기온 차이이고, 누르면 기온 비교.
 private struct PlaceCard: View {
     let place: TodayPlace
     let tz: String
@@ -146,6 +151,12 @@ private struct PlaceCard: View {
                 .padding(.horizontal)
                 .frame(minHeight: 48)
                 .contentShape(Rectangle())
+            }
+            if let headline = TemperatureComparisonModel(place: place, tz: tz, now: now, baseline: .yesterday)?.headline {
+                Divider()
+                NavigationLink(value: TemperatureRoute(placeID: place.id)) {
+                    TemperatureLinkRow(headline: headline)
+                }
             }
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
@@ -267,6 +278,40 @@ private struct PlaceCard: View {
         guard !windows.isEmpty else { return "앞으로 24시간 시간별 강수확률, 비 예상 시간 없음" }
         let parts = windows.map { "\(clock.windowText(start: $0.start, end: $0.end, now: now)) 최대 \($0.maxPop)%" }
         return "앞으로 24시간 시간별 강수확률, 비 예상 \(parts.joined(separator: ", "))"
+    }
+}
+
+/// 장소 카드 맨 아래: "지금 어제보다 3° 낮아요 / 조금 추워요" → 기온 비교
+private struct TemperatureLinkRow: View {
+    let headline: TemperatureComparisonModel.Headline
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: headline.delta.symbolName)
+                .font(.title3)
+                .foregroundStyle(headline.delta.tint)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(headline.subject) \(headline.text)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                if let feeling = headline.delta.feeling {
+                    Text(feeling)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            Spacer(minLength: 4)
+            Text("기온 비교")
+                .font(.subheadline.weight(.semibold))
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
     }
 }
 
