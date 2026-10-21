@@ -8,6 +8,9 @@ struct ContentView: View {
 
     var body: some View {
         content
+            // 불러오는 중 → 온보딩·탭 화면은 흐려지며 바뀐다
+            .motion(reduced: Motion.fade, value: model.phase)
+            .tracksLowPowerMode()
             .task { await model.start() }
             .onReceive(bridge.$apnsDeviceToken.combineLatest(bridge.$pushToStartToken)) { apns, pushToStart in
                 model.updateTokens(apns: apns, pushToStart: pushToStart)

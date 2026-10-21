@@ -5,7 +5,6 @@ import WeatherCore
 /// 의견이 갈리는 시간. "표로 보기"는 예보 × 시간 숫자 표(히트맵, 48시간).
 struct CompareView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var range = 24
     @State private var showsTable = false
     @State private var hidden: Set<String> = []
@@ -45,6 +44,9 @@ struct CompareView: View {
                     }
                 }
                 .padding()
+                .motion(reduced: Motion.fade, value: showsTable)
+                .motion(reduced: Motion.fade, value: model.today == nil)
+                .motion(Motion.gentle, value: model.today?.generatedAt)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("예보 비교")
@@ -91,8 +93,9 @@ struct CompareView: View {
             SourceValues(providers: chart.providers, focus: focus, when: when, hidden: $hidden)
             DisagreementList(disagreements: chart.disagreements) { selectedHour = $0 }
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.48), value: model.comparePlace)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.48), value: range)
+        .motion(Motion.gentle, value: model.comparePlace)
+        .motion(Motion.gentle, value: range)
+        .motion(value: hidden)
     }
 }
 

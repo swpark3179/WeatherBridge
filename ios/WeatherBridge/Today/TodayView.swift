@@ -9,7 +9,6 @@ enum RainRange: String {
 /// 오늘 화면: 맨 위에 한 줄 요약, 범위 선택(24시간·7일), 아래에 집·회사 카드. 카드를 누르면 비 상세로 간다.
 struct TodayView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var cardTransition
     /// 장면 상태로만 기억한다 (UserDefaults는 쓰지 않는다 — FileCache 참고)
     @SceneStorage("rainRange") private var range: RainRange = .day
@@ -49,7 +48,11 @@ struct TodayView: View {
                     }
                 }
                 .padding()
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.32), value: range)
+                .motion(value: range)
+                // 처음 받은 예보는 흐려지며 나타나고(안쪽이 먼저), 새로 받으면 숫자·막대가 새 값으로 옮겨 간다
+                .motion(reduced: Motion.fade, value: model.today == nil)
+                .motion(reduced: Motion.fade, value: model.todayError)
+                .motion(Motion.gentle, value: model.today?.generatedAt)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("오늘")
@@ -196,11 +199,13 @@ private struct PlaceCard: View {
                 if let temp = place.upcoming(hours: 1, now: now).first?.temp {
                     Text("\(Int(temp.rounded()))°")
                         .font(.title2.weight(.semibold))
+                        .contentTransition(.numericText(value: temp.rounded()))
                 }
                 if let range = place.temperatureRange(now: now) {
                     Text("최고 \(Int(range.high.rounded()))° · 최저 \(Int(range.low.rounded()))°")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 }
             }
         }
@@ -216,9 +221,11 @@ private struct PlaceCard: View {
                     .foregroundStyle(.blue)
                 Text(clock.rangeText(start: window.start, end: window.end))
                     .font(.largeTitle.weight(.semibold).monospacedDigit())
+                    .contentTransition(.numericText())
                 Text("\(window.hourCount)시간 · 최대 \(window.maxPop)% · 예보 \(window.total)개 중 \(window.agreeing)개")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
                 if let commute = commuteTimes.first(where: window.contains) {
                     Label("출근 \(clock.timeText(commute))이 비 시간에 걸려요", systemImage: "briefcase.fill")
                         .font(.footnote.weight(.semibold))

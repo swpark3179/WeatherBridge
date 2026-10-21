@@ -4,6 +4,7 @@ import WeatherCore
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draft = UserSettings(tz: TimeZone.current.identifier)
     @State private var loaded = false
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
@@ -53,7 +54,7 @@ struct SettingsView: View {
 
     private var summarySection: some View {
         Section {
-            Toggle("매일 요약 알림", isOn: $draft.summaryEnabled)
+            Toggle("매일 요약 알림", isOn: $draft.summaryEnabled.animation(reduceMotion ? nil : Motion.standard))
             if draft.summaryEnabled {
                 DatePicker("받을 시각", selection: clockBinding(\.summaryTime), displayedComponents: .hourAndMinute)
             }

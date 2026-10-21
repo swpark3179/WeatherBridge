@@ -31,6 +31,10 @@ struct TripListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             content
+                // 목록 ↔ 빈 화면 ↔ 불러오는 중은 흐려지며 바뀌고, 새로 받으면 카드가 새 값으로 바뀐다
+                .motion(reduced: Motion.fade, value: model.trips?.trips.isEmpty)
+                .motion(reduced: Motion.fade, value: model.tripsError)
+                .motion(Motion.gentle, value: model.trips?.generatedAt)
                 .navigationTitle("여행")
                 .navigationDestination(for: String.self) { id in
                     TripDetailView(tripID: id)
@@ -131,6 +135,8 @@ struct TripListView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
+        // 여행을 더하거나 지우면 줄이 밀려 들어가고 빠진다
+        .motion(value: models.map(\.id))
         .refreshable { await model.refreshTrips() }
         .onAppear { appeared = true }
     }
