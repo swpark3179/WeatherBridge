@@ -9,10 +9,11 @@ struct WeatherSceneView: View {
     var isActive = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLowPowerMode) private var isLowPowerMode
     @Environment(\.colorScheme) private var colorScheme
 
     private var paused: Bool {
-        !isActive || reduceMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
+        !isActive || reduceMotion || isLowPowerMode
     }
 
     var body: some View {
@@ -162,13 +163,14 @@ private struct WeatherScene {
     }
 }
 
-/// 옅은 빗줄기 (비 상세 카드 글자 뒤). 동작 줄이기가 켜져 있으면 그리지 않는다.
+/// 옅은 빗줄기 (비 상세 카드 글자 뒤). 동작 줄이기가 켜져 있으면 그리지 않고, 저전력 모드에서는 멈춘다.
 struct RainStreaks: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLowPowerMode) private var isLowPowerMode
 
     var body: some View {
         if !reduceMotion {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: isLowPowerMode)) { context in
                 Canvas { canvas, size in
                     Self.draw(
                         in: &canvas, size: size, time: context.date.timeIntervalSinceReferenceDate,

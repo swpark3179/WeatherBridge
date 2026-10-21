@@ -25,8 +25,9 @@ private struct PlotReveal: ViewModifier {
                 }
             }
             .onAppear {
-                guard progress == 0, !reduceMotion else { return }
-                withAnimation(.easeOut(duration: 1.1)) { progress = 1 }
+                guard progress == 0 else { return }
+                // 동작 줄이기면 바로 다 보이게 둔다. 0으로 남겨 두면 나중에 동작 줄이기를 끌 때 그림이 사라진다.
+                withMotion(Motion.reveal, reduceMotion: reduceMotion) { progress = 1 }
             }
     }
 }

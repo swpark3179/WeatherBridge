@@ -90,6 +90,9 @@ struct RainDetailView: View {
                 }
             }
             .padding()
+            // 비 구간을 바꾸면 숫자·그래프 강조·목록이 새 구간으로 옮겨 간다
+            .motion(value: windowIndex)
+            .motion(Motion.gentle, value: model.today?.generatedAt)
         }
     }
 }

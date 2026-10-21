@@ -166,7 +166,11 @@ private struct DayPager: View {
     let model: TripModel
     @Binding var selected: LocalDate?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
+        // 동작 줄이기면 옆 카드가 줄어들지 않고 흐려지기만 한다
+        let shrinks = !reduceMotion
         VStack(spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 12) {
@@ -175,7 +179,7 @@ private struct DayPager: View {
                             .containerRelativeFrame(.horizontal)
                             .scrollTransition(axis: .horizontal) { content, phase in
                                 content
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.92)
+                                    .scaleEffect(phase.isIdentity || !shrinks ? 1 : 0.92)
                                     .opacity(phase.isIdentity ? 1 : 0.6)
                             }
                     }
@@ -221,6 +225,8 @@ private struct TripDayCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 처음 보일 때 숫자를 지금 값에서 그 날 값으로 굴린다
     @State private var revealed = false
+    /// 이 카드가 보이게 될 때마다 하늘 아이콘을 한 번 튕긴다
+    @State private var bounce = 0
 
     var body: some View {
         let dest = day.destination
@@ -238,7 +244,7 @@ private struct TripDayCard: View {
                     Label(sky.label, systemImage: sky.symbolName)
                         .font(.subheadline.weight(.semibold))
                         .symbolRenderingMode(.multicolor)
-                        .symbolEffect(.bounce, value: isActive && !reduceMotion)
+                        .symbolEffect(.bounce, value: bounce)
                 }
             }
             .padding(.horizontal, 12)
@@ -296,12 +302,10 @@ private struct TripDayCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .accessibilityElement(children: .combine)
         .onChange(of: isActive, initial: true) { _, active in
-            guard active, !revealed else { return }
-            if reduceMotion {
-                revealed = true
-            } else {
-                withAnimation(.snappy(duration: 0.9).delay(0.15)) { revealed = true }
-            }
+            guard active else { return }
+            if !reduceMotion { bounce += 1 }
+            guard !revealed else { return }
+            withMotion(.snappy(duration: 0.9).delay(0.15), reduceMotion: reduceMotion) { revealed = true }
         }
     }
 }
