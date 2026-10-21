@@ -1,7 +1,7 @@
 import SwiftUI
 import WeatherCore
 
-/// 여행 등록·고치기: 목적지(국내·해외 검색), 이름, 기간(목적지 날짜).
+/// 여행 등록·고치기: 목적지(국내·해외 검색 카드), 이름, 기간(목적지 날짜).
 struct TripEditorView: View {
     /// 고칠 여행. nil이면 새 여행
     let trip: Trip?
@@ -11,6 +11,7 @@ struct TripEditorView: View {
     @State private var name = ""
     /// 고른 장소 이름으로 채운 이름. 사용자가 이름을 바꾸지 않았으면 다른 장소를 고를 때 따라 바뀐다.
     @State private var autoName = ""
+    /// 새로 고른 목적지. 고칠 때 nil이면 목적지는 그대로 둔다
     @State private var picked: PickedPlace?
     @State private var start = Calendar.current.startOfDay(for: .now)
     @State private var end = Calendar.current.startOfDay(for: .now)
@@ -28,26 +29,23 @@ struct TripEditorView: View {
                     .submitLabel(.done)
             }
 
-            if let trip, picked == nil {
-                Section {
-                    Label(trip.name, systemImage: "mappin.and.ellipse")
+            Section {
+                // 기억해 둔 목적지는 보여 주기만 한다: picked에 넣으면 이름을 덮어쓰고 고칠 때마다 좌표를 다시 보낸다
+                PlaceField(
+                    place: picked ?? remembered.map { PickedPlace($0) },
+                    savedName: trip?.name,
+                    options: PlaceSearchOptions(allowsCurrentLocation: false, region: .world, prompt: "도시, 주소, 장소 이름으로 검색")
+                ) { picked = $0 }
+                if let picked {
+                    LabeledContent("시간대", value: Self.timeZone(for: picked).map(timeZoneName) ?? "알 수 없음")
+                } else if let trip {
                     LabeledContent("시간대", value: timeZoneName(trip.tz))
-                } header: {
-                    Text("목적지")
-                } footer: {
-                    Text("다른 곳으로 바꾸려면 아래에서 검색하세요.")
                 }
+            } header: {
+                Text("목적지")
+            } footer: {
+                Text("국내·해외 모두 됩니다. 좌표는 약 1km 단위로 반올림해 저장하며, 예보 조회에만 씁니다.")
             }
-
-            PlaceSearchSection(
-                picked: $picked,
-                allowsCurrentLocation: false,
-                region: .world,
-                prompt: "도시, 주소, 장소 이름으로 검색",
-                footer: "국내·해외 모두 됩니다. 좌표는 약 1km 단위로 반올림해 저장하며, 예보 조회에만 씁니다.",
-                busy: $busy,
-                error: $error
-            )
 
             Section {
                 DatePicker("출발", selection: $start, in: startRange, displayedComponents: .date)
@@ -81,6 +79,7 @@ struct TripEditorView: View {
             }
         }
         .interactiveDismissDisabled(busy)
+        .motion(value: error)
         .onAppear(perform: load)
         .onChange(of: picked) { _, new in
             guard let new, name.isEmpty || name == autoName else { return }
@@ -92,6 +91,11 @@ struct TripEditorView: View {
             let last = lastDay(from: new)
             if end > last { end = last }
         }
+    }
+
+    /// 이 기기에서 마지막으로 고른 목적지 (고칠 때)
+    private var remembered: RememberedPlace? {
+        trip.flatMap { model.rememberedTrip($0.id) }
     }
 
     private var trimmedName: String {
@@ -130,13 +134,13 @@ struct TripEditorView: View {
     }
 
     private func save() async {
-        var destination: (coordinate: Coordinate, tz: String)?
+        var destination: (place: PickedPlace, tz: String)?
         if let picked {
             guard let tz = Self.timeZone(for: picked) else {
                 error = "이 장소의 시간대를 알 수 없어요. 가까운 도시 이름으로 다시 검색해 주세요."
                 return
             }
-            destination = (picked.coordinate, tz)
+            destination = (picked, tz)
         }
         // 날짜 고르기는 기기 달력으로 보이므로 같은 달력에서 날짜만 꺼낸다(시간대 변환 없이)
         let calendar = Calendar.current

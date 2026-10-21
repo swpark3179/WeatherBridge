@@ -50,6 +50,8 @@ final class AppModel: ObservableObject {
     private var tripsReloadPending = false
     /// 오늘 예보를 받는 중에 다시 받으라는 요청이 왔다 (장소를 바꾼 직후 등)
     private var todayReloadPending = false
+    /// 이 기기에서 고른 장소의 이름·주소·약 1km 좌표 (다시 열었을 때 지도에 보여 준다, D27)
+    @Published private(set) var placeMemory = DeviceStore.placeMemory.load() ?? PlaceMemory()
 
     init(bundle: Bundle = .main) {
         let info = bundle.infoDictionary ?? [:]
@@ -132,16 +134,43 @@ final class AppModel: ObservableObject {
 
     // MARK: 장소·설정
 
-    func savePlace(kind: PlaceKind, name: String, coordinate: Coordinate) async throws {
+    /// 집 또는 회사 저장. 예보는 기다리지 않고 뒤에서 다시 받는다(화면이 바로 닫히게).
+    func savePlace(kind: PlaceKind, name: String, place: PickedPlace) async throws {
         guard let api else { throw SupabaseError.notConfigured }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await api.setPlace(kind: kind, name: trimmed, coordinate: coordinate, tz: TimeZone.current.identifier)
+        try await api.setPlace(kind: kind, name: trimmed, coordinate: place.coordinate, tz: TimeZone.current.identifier)
         places = try await api.places()
-        if phase == .ready {
-            await refreshToday()
-            // 여행의 "지금"은 집 최근 3일이라 집이 바뀌면 다시 받는다
-            if kind == .home { await refreshTrips() }
+        // set_place는 저장할 때마다 새 id를 만든다
+        if let id = places.first(where: { $0.kind == kind })?.id {
+            updatePlaceMemory { $0.remember(place.remembered(id: id), as: .place(kind)) }
         }
+        if phase == .ready {
+            Task {
+                await refreshToday()
+                // 여행의 "지금"은 집 최근 3일이라 집이 바뀌면 다시 받는다
+                if kind == .home { await refreshTrips() }
+            }
+        }
+    }
+
+    /// 이 기기에서 고른 집·회사 위치. 지금 서버의 장소와 id가 같을 때만
+    func rememberedPlace(_ kind: PlaceKind) -> RememberedPlace? {
+        guard let id = places.first(where: { $0.kind == kind })?.id else { return nil }
+        return placeMemory.place(.place(kind), id: id)
+    }
+
+    /// 이 기기에서 고른 여행 목적지
+    func rememberedTrip(_ id: String) -> RememberedPlace? {
+        placeMemory.place(.trip(id), id: id)
+    }
+
+    /// 바뀐 것이 있을 때만 파일에 쓴다
+    private func updatePlaceMemory(_ change: (inout PlaceMemory) -> Void) {
+        var memory = placeMemory
+        change(&memory)
+        guard memory != placeMemory else { return }
+        placeMemory = memory
+        DeviceStore.placeMemory.save(memory)
     }
 
     func saveSettings(_ new: UserSettings) async throws {
@@ -222,6 +251,7 @@ final class AppModel: ObservableObject {
                 tripsIsCached = false
                 tripsError = nil
                 ResponseCache.trips.save(fresh)
+                updatePlaceMemory { $0.keepTrips(Set(fresh.trips.map(\.id))) }
             } catch {
                 tripsError = Self.describe(error)
             }
@@ -233,13 +263,22 @@ final class AppModel: ObservableObject {
     func saveTrip(
         id: String?,
         name: String,
-        destination: (coordinate: Coordinate, tz: String)?,
+        destination: (place: PickedPlace, tz: String)?,
         start: LocalDate,
         end: LocalDate
     ) async throws -> String {
         guard let api else { throw SupabaseError.notConfigured }
         let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(30))
-        let saved = try await api.setTrip(id: id, name: trimmed, destination: destination, start: start, end: end)
+        let saved = try await api.setTrip(
+            id: id,
+            name: trimmed,
+            destination: destination.map { (coordinate: $0.place.coordinate, tz: $0.tz) },
+            start: start,
+            end: end
+        )
+        if let destination {
+            updatePlaceMemory { $0.remember(destination.place.remembered(id: saved, tz: destination.tz), as: .trip(saved)) }
+        }
         await refreshTrips()
         return saved
     }
@@ -248,6 +287,7 @@ final class AppModel: ObservableObject {
         guard let api else { throw SupabaseError.notConfigured }
         try await api.deleteTrip(id: id)
         trips?.trips.removeAll { $0.id == id }
+        updatePlaceMemory { $0.forget(.trip(id)) }
         await refreshTrips()
     }
 
@@ -301,6 +341,8 @@ final class AppModel: ObservableObject {
             trips = nil
             ResponseCache.today.clear()
             ResponseCache.trips.clear()
+            placeMemory = PlaceMemory()
+            DeviceStore.placeMemory.clear()
             registered = nil
             settings = UserSettings(tz: TimeZone.current.identifier)
             hasSavedSettings = false

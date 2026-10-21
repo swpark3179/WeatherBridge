@@ -114,13 +114,29 @@ struct SettingsView: View {
         Section("장소") {
             ForEach([PlaceKind.home, .office], id: \.self) { kind in
                 let place = model.places.first { $0.kind == kind }
+                let remembered = model.rememberedPlace(kind)
                 NavigationLink {
-                    PlacePickerView(kind: kind, initialName: place?.name) { name, coordinate in
-                        try await model.savePlace(kind: kind, name: name, coordinate: coordinate)
+                    PlacePickerView(
+                        kind: kind,
+                        initialName: place?.name,
+                        remembered: remembered,
+                        dismissOnSave: true
+                    ) { name, picked in
+                        try await model.savePlace(kind: kind, name: name, place: picked)
                     }
                 } label: {
                     LabeledContent {
-                        Text(place?.name ?? "등록 안 됨")
+                        // 이 기기에서 고른 위치면 주소도 보여 준다
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(place?.name ?? "등록 안 됨")
+                            if let address = remembered?.subtitle ?? remembered?.label {
+                                Text(address)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .contentTransition(.opacity)
                     } label: {
                         Label(kind.defaultName, systemImage: kind.symbolName)
                     }

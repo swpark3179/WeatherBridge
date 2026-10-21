@@ -1,17 +1,29 @@
 import SwiftUI
 import WeatherCore
 
-/// 집·회사 위치 고르기: 현재 위치 또는 주소·장소 검색. 저장은 약 1km 단위로만 한다.
+/// 집·회사 위치 고르기: 이름과 위치 카드(누르면 현재 위치 또는 주소·장소 검색). 저장은 약 1km 단위로만 한다.
+/// 이 기기에서 전에 고른 위치가 있으면 처음부터 보여 주고, 이름만 바꿔도 저장할 수 있다.
 struct PlacePickerView: View {
     let kind: PlaceKind
     var initialName: String?
+    /// 이 기기에서 마지막으로 고른 위치 (서버는 좌표를 돌려주지 않는다)
+    var remembered: RememberedPlace?
     var saveTitle = "저장"
-    let onSave: (_ name: String, _ coordinate: Coordinate) async throws -> Void
+    /// 저장하면 화면을 닫는다 (설정에서 열었을 때)
+    var dismissOnSave = false
+    let onSave: (_ name: String, _ place: PickedPlace) async throws -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var picked: PickedPlace?
     @State private var busy = false
     @State private var error: String?
+    @State private var saves = 0
+
+    /// 저장할 위치: 새로 고른 것, 없으면 기억해 둔 것
+    private var location: PickedPlace? {
+        picked ?? remembered.map { PickedPlace($0) }
+    }
 
     var body: some View {
         Form {
@@ -20,7 +32,14 @@ struct PlacePickerView: View {
                     .submitLabel(.done)
             }
 
-            PlaceSearchSection(picked: $picked, busy: $busy, error: $error)
+            Section {
+                // 서버에 등록돼 있지만 이 기기에 기억이 없으면(재설치 등) "저장된 위치"로 보인다
+                PlaceField(place: location, savedName: initialName.map { _ in "저장된 위치" }) { picked = $0 }
+            } header: {
+                Text("위치")
+            } footer: {
+                Text("좌표는 약 1km 단위로 반올림해 저장하며, 예보 조회에만 씁니다.")
+            }
 
             if let error {
                 Section {
@@ -38,121 +57,29 @@ struct PlacePickerView: View {
                         if busy { ProgressView() }
                     }
                 }
-                .disabled(picked == nil || busy)
+                .disabled(location == nil || busy)
             }
         }
         .navigationTitle(kind.title)
         .onAppear {
             if name.isEmpty { name = initialName ?? kind.defaultName }
         }
+        .sensoryFeedback(.success, trigger: saves)
+        .motion(value: error)
     }
 
     private func save() async {
-        guard let picked else { return }
+        guard let location else { return }
         let finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         busy = true
         defer { busy = false }
         do {
-            try await onSave(finalName.isEmpty ? kind.defaultName : String(finalName.prefix(30)), picked.coordinate)
+            try await onSave(finalName.isEmpty ? kind.defaultName : String(finalName.prefix(30)), location)
             error = nil
+            saves += 1
+            if dismissOnSave { dismiss() }
         } catch {
             self.error = "저장하지 못했습니다: \(AppModel.describe(error))"
-        }
-    }
-}
-
-/// 위치 고르기 섹션: 현재 위치(선택) 또는 주소·장소 검색. 고른 결과는 `picked`에 둔다.
-/// Form 안에 넣는다. 검색 중에는 `busy`, 실패하면 `error`를 바꾼다.
-struct PlaceSearchSection: View {
-    @Binding var picked: PickedPlace?
-    let allowsCurrentLocation: Bool
-    let prompt: String
-    let footer: String
-    @Binding var busy: Bool
-    @Binding var error: String?
-
-    @StateObject private var search: PlaceSearch
-    @State private var location = LocationProvider()
-
-    init(
-        picked: Binding<PickedPlace?>,
-        allowsCurrentLocation: Bool = true,
-        region: PlaceSearch.Region = .korea,
-        prompt: String = "주소, 건물·회사 이름으로 검색",
-        footer: String = "좌표는 약 1km 단위로 반올림해 저장하며, 예보 조회에만 씁니다.",
-        busy: Binding<Bool>,
-        error: Binding<String?>
-    ) {
-        _picked = picked
-        self.allowsCurrentLocation = allowsCurrentLocation
-        self.prompt = prompt
-        self.footer = footer
-        _busy = busy
-        _error = error
-        _search = StateObject(wrappedValue: PlaceSearch(region: region))
-    }
-
-    var body: some View {
-        Section {
-            if allowsCurrentLocation {
-                Button {
-                    Task { await useCurrentLocation() }
-                } label: {
-                    Label("현재 위치 사용", systemImage: "location.fill")
-                }
-                .disabled(busy)
-            }
-
-            TextField(prompt, text: $search.query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            ForEach(search.suggestions) { suggestion in
-                Button {
-                    Task { await choose(suggestion) }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(suggestion.title).foregroundStyle(.primary)
-                        if !suggestion.subtitle.isEmpty {
-                            Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .disabled(busy)
-            }
-        } header: {
-            Text("위치")
-        } footer: {
-            Text(footer)
-        }
-
-        if let picked {
-            Section("선택한 위치") {
-                Label(picked.label, systemImage: "mappin.and.ellipse")
-            }
-        }
-    }
-
-    private func useCurrentLocation() async {
-        busy = true
-        defer { busy = false }
-        do {
-            let coordinate = try await location.currentCoordinate()
-            picked = PickedPlace(label: "현재 위치", coordinate: coordinate, timeZone: nil)
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func choose(_ suggestion: PlaceSearch.Suggestion) async {
-        busy = true
-        defer { busy = false }
-        do {
-            picked = try await search.place(for: suggestion)
-            error = nil
-        } catch {
-            self.error = "위치를 찾지 못했습니다. 다른 이름으로 검색해 주세요."
         }
     }
 }
