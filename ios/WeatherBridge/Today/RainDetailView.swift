@@ -159,37 +159,6 @@ private struct RainHero: View {
     }
 }
 
-/// 비 구간 카드 글자 뒤의 옅은 빗줄기. 동작 줄이기가 켜져 있으면 그리지 않는다.
-private struct RainStreaks: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let count = 16
-
-    var body: some View {
-        if !reduceMotion {
-            TimelineView(.animation) { context in
-                Canvas { canvas, size in
-                    let now = context.date.timeIntervalSinceReferenceDate
-                    for i in 0..<Self.count {
-                        // 줄기마다 위치·주기(1.1–1.8초)·위상을 고정해 매번 같은 모양으로 떨어진다
-                        let x = size.width * CGFloat((i * 37 + 11) % 97) / 97
-                        let period = 1.1 + Double((i * 173) % 700) / 1000
-                        let offset = Double((i * 311) % 1800) / 1800
-                        let phase = (now / period + offset).truncatingRemainder(dividingBy: 1)
-                        let y = -16 + (size.height + 32) * CGFloat(phase)
-                        var streak = Path()
-                        streak.move(to: CGPoint(x: x, y: y))
-                        streak.addLine(to: CGPoint(x: x, y: y + 16))
-                        canvas.stroke(streak, with: .color(.blue.opacity(0.3)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                    }
-                }
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-    }
-}
-
 private struct StatTile: View {
     let title: String
     let value: String
