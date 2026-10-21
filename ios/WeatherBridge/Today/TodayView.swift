@@ -20,7 +20,7 @@ struct TodayView: View {
                     if let today = model.today {
                         let now = Int(Date().timeIntervalSince1970)
                         OverviewHeader(today: today, now: now, isCached: model.todayIsCached, range: range)
-                        Picker("비 소식 범위", selection: $range) {
+                        Picker("보기 범위", selection: $range) {
                             Text("24시간").tag(RainRange.day)
                             Text("7일").tag(RainRange.week)
                         }
@@ -118,7 +118,7 @@ private struct OverviewHeader: View {
 
 /// 장소 카드: 다음 비 시각(크게), 비 구간 칩, 24시간 막대와 시각 눈금. 누르면 비 상세.
 /// 7일 보기에서는 그 대신 비 오는 날과 날짜별 강수확률을 보여 준다.
-/// 맨 아래 줄은 어제 같은 시각과의 기온 차이이고, 누르면 기온 비교.
+/// 맨 아래 줄은 최근 3일과의 기온 차이(24시간 보기는 지금 시각, 7일 보기는 날짜별 최고·최저)이고, 누르면 기온 비교.
 private struct PlaceCard: View {
     let place: TodayPlace
     let tz: String
@@ -180,14 +180,39 @@ private struct PlaceCard: View {
             }
             Divider()
             // 지난 기록이 아직 없어도 줄은 늘 보여서 기능을 찾을 수 있게 한다
-            NavigationLink(value: TemperatureRoute(placeID: place.id)) {
-                TemperatureLinkRow(
-                    headline: TemperatureComparisonModel(place: place, tz: tz, now: now, baseline: .yesterday)?.headline
-                )
+            NavigationLink(value: TemperatureRoute(placeID: place.id, mode: range == .week ? .week : .today)) {
+                temperatureLink
             }
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         .matchedTransitionSource(id: place.id, in: zoomNamespace)
+    }
+
+    /// 24시간 보기: "지금 최근 3일보다 3° 낮아요 / 조금 추워요",
+    /// 7일 보기: "최근 3일보다 조금 추워요 / 앞으로 7일 · 가장 추운 날 토 최저 3° (−6°)"
+    private var temperatureLink: TemperatureLinkRow {
+        switch range {
+        case .day:
+            if let headline = TemperatureComparisonModel(place: place, tz: tz, now: now)?.headline {
+                return TemperatureLinkRow(
+                    symbolName: headline.delta.symbolName,
+                    tint: headline.delta.tint,
+                    title: "\(headline.subject) \(headline.text)",
+                    caption: headline.delta.feeling
+                )
+            }
+            return TemperatureLinkRow(caption: "지난 기온을 받는 중이에요")
+        case .week:
+            if let week = WeekTemperatureModel(place: place, tz: tz, now: now), let headline = week.headline {
+                return TemperatureLinkRow(
+                    symbolName: week.outlook?.symbolName ?? "thermometer.medium",
+                    tint: week.outlook?.tint ?? .secondary,
+                    title: headline,
+                    caption: ["앞으로 \(week.days.count)일", week.detail].compactMap { $0 }.joined(separator: " · ")
+                )
+            }
+            return TemperatureLinkRow(caption: "7일 기온을 받는 중이에요")
+        }
     }
 
     private var header: some View {
@@ -344,21 +369,26 @@ private struct PlaceCard: View {
     }
 }
 
-/// 장소 카드 맨 아래: "지금 어제보다 3° 낮아요 / 조금 추워요" → 기온 비교.
-/// 어제와 견줄 기록이 아직 없으면(배포 직후·새 장소) 안내 문구를 보여 준다.
+/// 장소 카드 맨 아래: "지금 최근 3일보다 3° 낮아요 / 조금 추워요" → 기온 비교.
+/// 견줄 기록이 아직 없으면(배포 직후·새 장소) 기본 문구와 안내를 보여 준다.
 private struct TemperatureLinkRow: View {
-    let headline: TemperatureComparisonModel.Headline?
+    var symbolName = "thermometer.medium"
+    var tint = Color.secondary
+    var title = "최근 3일과 기온 비교"
+    let caption: String?
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: headline?.delta.symbolName ?? "thermometer.medium")
+            Image(systemName: symbolName)
                 .font(.title3)
-                .foregroundStyle(headline?.delta.tint ?? Color.secondary)
+                .foregroundStyle(tint)
                 .frame(width: 24)
+                .contentTransition(.symbolEffect(.replace))
             VStack(alignment: .leading, spacing: 1) {
-                Text(headline.map { "\($0.subject) \($0.text)" } ?? "어제와 기온 비교")
+                Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
                 if let caption {
                     Text(caption)
                         .font(.caption)
@@ -376,12 +406,6 @@ private struct TemperatureLinkRow: View {
         .padding(.vertical, 6)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
-    }
-
-    /// 체감 표현("조금 추워요"). 아직 견줄 기록이 없으면 안내
-    private var caption: String? {
-        guard let headline else { return "지난 기온을 받는 중이에요" }
-        return headline.delta.feeling
     }
 }
 

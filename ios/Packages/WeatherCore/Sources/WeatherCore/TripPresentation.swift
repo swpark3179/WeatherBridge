@@ -42,13 +42,26 @@ public struct HomeBaseline: Hashable, Sendable {
     /// 평균에 쓴 모델
     public let providers: [String]
 
-    /// `providers`가 nil이면 `recent`의 모든 모델. 원하는 모델의 기록이 하나라도 없거나, 하루 최고·최저를
-    /// 구할 만큼 값이 있는 날이 없으면 nil
+    /// 모델별 기록(`recent`)에서 고른 모델로. `providers`가 nil이면 `recent`의 모든 모델.
+    /// 원하는 모델의 기록이 하나라도 없거나, 하루 최고·최저를 구할 만큼 값이 있는 날이 없으면 nil
     public init?(recent: [TemperatureHistory], providers wanted: [String]? = nil, tz: String, now: Int) {
         let models = wanted ?? recent.compactMap(\.providers.first)
         let series = models.compactMap { model in recent.first { $0.providers == [model] } }
         guard !series.isEmpty, series.count == models.count else { return nil }
+        // 모든 모델에 값이 있는 시간만 평균한다 (서버 tempHistory와 같은 규칙)
+        self.init(providers: models, tz: tz, now: now) { t in
+            let temps = series.compactMap { $0.temp(at: t) }
+            return temps.count == series.count ? temps.reduce(0, +) / Double(temps.count) : nil
+        }
+    }
 
+    /// 서버가 이미 모델 평균으로 보낸 기록(`TodayPlace.tempHistory`)으로. 오늘 기온 비교의 최고·최저 기준과 같은 값이다.
+    /// 하루 최고·최저를 구할 만큼 값이 있는 날이 없으면 nil
+    public init?(history: TemperatureHistory, tz: String, now: Int) {
+        self.init(providers: history.providers, tz: tz, now: now, temp: history.temp(at:))
+    }
+
+    private init?(providers: [String], tz: String, now: Int, temp: (Int) -> Double?) {
         let clock = LocalClock(tz: tz)
         let today = clock.startOfDay(now)
         var highs: [Double] = []
@@ -56,11 +69,7 @@ public struct HomeBaseline: Hashable, Sendable {
         for back in 1...Self.days {
             let start = clock.addingDays(-back, to: today)
             let hours = DayTemperature.hours(from: start, to: clock.addingDays(1, to: start))
-            // 모든 모델에 값이 있는 시간만 평균한다 (서버 tempHistory와 같은 규칙)
-            let values = hours.map { t -> Double? in
-                let temps = series.compactMap { $0.temp(at: t) }
-                return temps.count == series.count ? temps.reduce(0, +) / Double(temps.count) : nil
-            }
+            let values = hours.map(temp)
             if let high = DayTemperature.extreme(values, hours: hours.count, { $0.max() }) { highs.append(high) }
             if let low = DayTemperature.extreme(values, hours: hours.count, { $0.min() }) { lows.append(low) }
         }
@@ -68,7 +77,7 @@ public struct HomeBaseline: Hashable, Sendable {
         high = highs.reduce(0, +) / Double(highs.count)
         low = lows.reduce(0, +) / Double(lows.count)
         dayCount = highs.count
-        providers = models
+        self.providers = providers
     }
 }
 
@@ -93,18 +102,20 @@ public struct TemperatureOutlook: Hashable, Sendable {
     /// "지금보다 조금 추워요", "지금보다 일교차가 커요", "지금과 비슷해요". 비교할 값이 없으면 nil
     public let headline: String?
 
-    public init(high: TemperatureDelta?, low: TemperatureDelta?) {
+    /// - Parameter label: 기준을 부르는 말. 여행은 "지금", 오늘 탭 7일 보기는 "최근 3일"
+    public init(high: TemperatureDelta?, low: TemperatureDelta?, label: String = nowLabel) {
         self.high = high
         self.low = low
-        let described = Self.describe(high: high, low: low)
+        let described = Self.describe(high: high, low: low, label: label)
         trend = described?.trend
         headline = described?.text
     }
 
     /// 최고·최저가 반대로 움직이면 일교차로 말하고, 아니면 하루 가운데 값(최고·최저 평균)의 체감으로 말한다.
     /// 가운데 값이 비슷하면 비슷하지 않은 쪽의 체감을 쓴다.
-    static func describe(high: TemperatureDelta?, low: TemperatureDelta?) -> (trend: Trend, text: String)? {
-        let label = nowLabel
+    static func describe(
+        high: TemperatureDelta?, low: TemperatureDelta?, label: String = nowLabel
+    ) -> (trend: Trend, text: String)? {
         let similar = (Trend.similar, "\(Hangul.withAnd(label)) 비슷해요")
         func felt(_ delta: TemperatureDelta) -> (Trend, String)? {
             delta.feeling.map { (delta.degrees < 0 ? .colder : .warmer, "\(label)보다 \($0)") }

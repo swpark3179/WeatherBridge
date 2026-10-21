@@ -134,7 +134,9 @@ WeatherBridge/
 - 진행 상황: A(#6)·B(#7)·C1(#8)·C2(#9) 병합, 서버 배포 완료(실서버 익명 흐름 확인), TestFlight 업로드 성공(#10–#12에서 서명·버전 설정 수정). 남은 확인: 실기기에서 요약 알림 ±1분 수신(`Device check`, [spikes.md](spikes.md) "Phase 2 실기기 확인"), S2·S3.
 1. 익명 로그인 + 기기 등록(APNs 토큰·apns_env, 재설치 대비 복구 코드), 온보딩: 집·회사 위치(현재 위치 / Open-Meteo Geocoding `language=ko` 검색).
 2. **오늘 화면**: 집·회사 카드 — 시간대별 강수확률 막대(등급 색), 비 구간 강조 배너, 기온·하늘 보조, 갱신 시각.
-   - **기온 비교**: 카드 맨 아래 "지금 어제보다 3° 낮아요" → 오늘(0–24시) 시간별 기온을 어제·최근 3일·최근 7일의 같은 시각과 비교(그래프·최고/최저·시간별 차이). 서버 `today`가 장소별 `tempHistory`(7일 전 자정~오늘 자정)를 싣고, 비교·문구는 `WeatherCore.TemperatureComparisonModel`([decisions.md](decisions.md) D21).
+   - **기온 비교**: 기준은 늘 **최근 3일**(어제·그제·3일 전, 여행 탭의 "지금"과 같음). 카드 맨 아래 줄은 24시간 보기면 "지금 최근 3일보다 3° 낮아요", 7일 보기면 "최근 3일보다 조금 추워요"이고, 누르면 같은 보기로 기온 비교가 열린다. `[오늘 | 7일]` 전환:
+     - 오늘: 오늘(0–24시) 시간별 기온을 같은 시각과 비교(그래프·최고/최저·시간별 차이). 서버 `today`의 `tempHistory`(7일 전 자정~오늘 자정), `WeatherCore.TemperatureComparisonModel`([decisions.md](decisions.md) D21).
+     - 7일: 오늘부터 날짜별 최고·최저를 최근 3일 평균 최고·최저와 비교(최고끼리·최저끼리, 막대와 차이, 가장 추운·더운 날). 서버 `today`의 `days[].temps`(그 날 끝까지 닿는 모델 평균)와 `recentTemps`(모델별 최근 3일), `WeatherCore.WeekTemperatureModel`([decisions.md](decisions.md) D26).
    - **24시간 ↔ 7일 보기**: 맨 위 요약 아래 `[24시간 | 7일]` 전환. 7일 보기는 시간대 없이 날짜마다 비 여부·강수확률(계열별 그 날 최고값의 종합)과 비 오는 날 요약. 서버 `today`가 장소별 `days`(오늘부터 7일)를 싣고, 문구는 `WeatherCore.WeekRainModel`([decisions.md](decisions.md) D22).
 3. **비교 화면(기본)**: 소스×시간 히트맵, 종합·편차·합의도.
 4. 설정: 출근시간·요일, 요약 시각, 강수 임계값, 데이터 출처 표기(Open-Meteo CC BY, WeatherKit 로고·법적 링크 등).

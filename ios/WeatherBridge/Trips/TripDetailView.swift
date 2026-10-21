@@ -354,23 +354,6 @@ private struct RainValue: View {
     }
 }
 
-/// "최고 −4°" (추워지면 파랑, 더워지면 주황)
-private struct DeltaChip: View {
-    let title: String
-    let delta: TemperatureDelta?
-
-    var body: some View {
-        if let delta {
-            Label("\(title) \(delta.signedText)", systemImage: delta.symbolName)
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .foregroundStyle(delta.tint)
-                .background(delta.tint.opacity(0.15), in: Capsule())
-        }
-    }
-}
-
 /// 같은 날 집: 하늘, 최고/최저, 비, 지금과 비교
 private struct HomeLine: View {
     let name: String
@@ -618,33 +601,13 @@ private struct RangeRow: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .trailing)
-            GeometryReader { geo in
-                let x = { (v: Double) -> CGFloat in
-                    geo.size.width * CGFloat((v - scale.lowerBound) / (scale.upperBound - scale.lowerBound))
-                }
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(.tertiarySystemFill))
-                        .frame(height: 6)
-                    if let low = dest.low, let high = dest.high {
-                        Capsule()
-                            .fill(LinearGradient(colors: [.blue, .orange], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: max(6, x(high) - x(low)), height: 6)
-                            .scaleEffect(x: shown ? 1 : 0.01, anchor: .center)
-                            .offset(x: x(low))
-                    }
-                    if let baseline {
-                        ForEach([baseline.low, baseline.high], id: \.self) { value in
-                            Rectangle()
-                                .fill(Color.secondary.opacity(0.7))
-                                .frame(width: 2, height: 14)
-                                .offset(x: x(value) - 1)
-                        }
-                    }
-                }
-                .frame(maxHeight: .infinity)
-            }
-            .frame(height: 16)
+            RangeBar(
+                low: dest.low,
+                high: dest.high,
+                scale: scale,
+                ticks: baseline.map { [$0.low, $0.high] } ?? [],
+                shown: shown
+            )
             Text(degreesText(dest.high))
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .frame(width: 34, alignment: .trailing)
