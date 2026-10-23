@@ -59,7 +59,7 @@ struct DeltaChip: View {
     }
 }
 
-/// 하루 최저~최고 막대(파랑 → 주황)와 기준 눈금(회색 세로선). 여행 날짜별 막대와 오늘 탭 7일 기온이 함께 쓴다.
+/// 하루 최저~최고 막대(파랑 → 주황)와 기준 눈금(회색 세로선). 여행 날짜별 막대와 기온 탭 7일 보기가 함께 쓴다.
 struct RangeBar: View {
     let low: Double?
     let high: Double?

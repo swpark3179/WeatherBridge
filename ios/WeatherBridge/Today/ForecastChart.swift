@@ -2,11 +2,15 @@ import Charts
 import SwiftUI
 import WeatherCore
 
-/// 비교 그래프: 종합(굵은 선)과 예보별 선, 예보 범위 띠, 비 구간 음영, 의견이 갈리는 시간(맨 위 띠).
-/// 밀어서 시간을 고르면 1시간 단위로 붙는다.
-struct CompareChart: View {
+/// 비 상세의 예보 그래프: 종합 강수확률 선, 예보들의 최저–최고 띠, 비 구간 음영.
+/// "예보별 선"을 켜면 예보마다 선과 의견이 갈리는 시간(맨 위 띠)도 그린다. 밀어서 시간을 고르면 1시간 단위로 붙는다.
+struct ForecastChart: View {
     let model: CompareChartModel
     let threshold: Int
+    /// 진하게 칠할 비 구간의 시작 시각 (24·48시간 구간은 끝이 다를 수 있어 시작으로 맞춘다)
+    let selectedWindowStart: Int?
+    /// 예보마다 선을 그린다
+    let showsSources: Bool
     /// 그리지 않을 예보
     let hidden: Set<String>
     let focus: TodayHour?
@@ -15,8 +19,11 @@ struct CompareChart: View {
     @State private var rawSelection: Date?
 
     private var visibleProviders: [String] {
-        model.providers.filter { !hidden.contains($0) }
+        showsSources ? model.providers.filter { !hidden.contains($0) } : []
     }
+
+    /// 예보별 선을 켜면 종합은 굵은 기본색, 끄면 파랑
+    private var consensusColor: Color { showsSources ? .primary : .blue }
 
     var body: some View {
         Chart {
@@ -27,16 +34,18 @@ struct CompareChart: View {
                     yStart: .value("아래", 0),
                     yEnd: .value("위", 100)
                 )
-                .foregroundStyle(Color.blue.opacity(0.08))
+                .foregroundStyle(Color.blue.opacity(window.start == selectedWindowStart ? 0.16 : 0.07))
             }
-            ForEach(Array(model.splits.enumerated()), id: \.offset) { _, span in
-                RectangleMark(
-                    xStart: .value("시작", date(span.start)),
-                    xEnd: .value("끝", date(span.end)),
-                    yStart: .value("아래", 96),
-                    yEnd: .value("위", 100)
-                )
-                .foregroundStyle(Color.primary.opacity(0.35))
+            if showsSources {
+                ForEach(Array(model.splits.enumerated()), id: \.offset) { _, span in
+                    RectangleMark(
+                        xStart: .value("시작", date(span.start)),
+                        xEnd: .value("끝", date(span.end)),
+                        yStart: .value("아래", 96),
+                        yEnd: .value("위", 100)
+                    )
+                    .foregroundStyle(Color.primary.opacity(0.35))
+                }
             }
             RuleMark(y: .value("기준", threshold))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
@@ -73,8 +82,8 @@ struct CompareChart: View {
                         y: .value("강수확률", value),
                         series: .value("예보", "consensus")
                     )
-                    .foregroundStyle(Color.primary)
-                    .lineStyle(StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+                    .foregroundStyle(consensusColor)
+                    .lineStyle(StrokeStyle(lineWidth: showsSources ? 3.5 : 2.5, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
                 }
             }
@@ -97,7 +106,7 @@ struct CompareChart: View {
                         x: .value("고른 시각", middle(focus)),
                         y: .value("강수확률", value)
                     )
-                    .foregroundStyle(Color.primary)
+                    .foregroundStyle(consensusColor)
                     .symbolSize(90)
                 }
             }
@@ -137,7 +146,7 @@ struct CompareChart: View {
             }
         }
         .sensoryFeedback(.selection, trigger: selectedHour)
-        .accessibilityLabel("종합과 예보별 시간대 강수확률 그래프")
+        .accessibilityLabel(showsSources ? "종합과 예보별 시간대 강수확률 그래프" : "종합 강수확률 그래프")
     }
 
     private var xDomain: ClosedRange<Date> {

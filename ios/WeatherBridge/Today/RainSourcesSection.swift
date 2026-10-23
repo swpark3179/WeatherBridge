@@ -1,165 +1,89 @@
 import SwiftUI
 import WeatherCore
 
-/// 비교 화면: 장소별로 종합·예보별 강수확률 그래프(앞으로 24/48시간), 고른 시간의 예보별 값,
-/// 의견이 갈리는 시간. "표로 보기"는 예보 × 시간 숫자 표(히트맵, 48시간).
-struct CompareView: View {
-    @EnvironmentObject private var model: AppModel
-    @State private var range = 24
-    @State private var showsTable = false
-    @State private var hidden: Set<String> = []
-    /// 고른 시간 (`TodayHour.t`). nil이면 기간 안에서 종합이 가장 높은 시간
-    @State private var selectedHour: Int?
+// 비 상세의 "예보별" 섹션 부품: 예보별 값, 의견이 갈리는 시간, 표(히트맵).
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let today = model.today, !today.places.isEmpty {
-                        Picker("장소", selection: $model.comparePlace) {
-                            ForEach(today.places) { place in
-                                Text(place.name).tag(place.kind)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-
-                        if let place = today.places.first(where: { $0.kind == model.comparePlace }) ?? today.places.first {
-                            let now = Int(Date().timeIntervalSince1970)
-                            if showsTable {
-                                HeatmapView(model: HeatmapModel(place: place, tz: today.tz, now: now))
-                                Legend()
-                            } else {
-                                charts(place: place, today: today, now: now)
-                            }
-                            if !place.errors.isEmpty {
-                                Label("받지 못한 소스: \(place.errors.joined(separator: ", "))", systemImage: "exclamationmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                            }
-                        }
-                    } else if let error = model.todayError {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                    } else {
-                        ProgressView("예보를 불러오는 중…").frame(maxWidth: .infinity).padding(.top, 80)
-                    }
-                }
-                .padding()
-                .motion(reduced: Motion.fade, value: showsTable)
-                .motion(reduced: Motion.fade, value: model.today == nil)
-                .motion(Motion.gentle, value: model.today?.generatedAt)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("예보 비교")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(showsTable ? "그래프로 보기" : "표로 보기") { showsTable.toggle() }
-                }
-            }
-            .refreshable { await model.refreshToday() }
-        }
-    }
-
-    private func charts(place: TodayPlace, today: TodayResponse, now: Int) -> some View {
-        let chart = CompareChartModel(place: place, tz: today.tz, now: now, hours: range)
-        let clock = LocalClock(tz: today.tz)
-        let focus = chart.hours.first { $0.t == selectedHour }
-            ?? chart.hours.max { ($0.consensus ?? 0) < ($1.consensus ?? 0) }
-        let when = focus.map { "\(clock.dayLabel($0.t, from: now)) \(clock.hour($0.t))시" } ?? ""
-        return VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(when)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Text("종합 \(focus?.consensus ?? 0)%")
-                            .font(.title2.weight(.semibold).monospacedDigit())
-                            .contentTransition(.numericText(value: Double(focus?.consensus ?? 0)))
-                    }
-                    Spacer()
-                    Picker("기간", selection: $range) {
-                        Text("24시간").tag(24)
-                        Text("48시간").tag(48)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
-                }
-                CompareChart(model: chart, threshold: today.threshold, hidden: hidden, focus: focus, selectedHour: $selectedHour)
-                    .frame(height: 220)
-            }
-            .padding()
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-
-            SourceValues(providers: chart.providers, focus: focus, when: when, hidden: $hidden)
-            DisagreementList(disagreements: chart.disagreements) { selectedHour = $0 }
-        }
-        .motion(Motion.gentle, value: model.comparePlace)
-        .motion(Motion.gentle, value: range)
-        .motion(value: hidden)
-    }
-}
-
-/// 고른 시간의 종합·예보별 값. 예보 행을 누르면 그래프에서 끄고 켠다.
-private struct SourceValues: View {
+/// 고른 시간의 종합·예보별 값. "예보별 선"을 켜면 그래프에 예보마다 선이 보이고, 예보 줄을 누르면 그 선을 끄고 켠다.
+struct SourceValues: View {
     let providers: [String]
     let focus: TodayHour?
     let when: String
+    @Binding var showsSources: Bool
     @Binding var hidden: Set<String>
 
     var body: some View {
         let consensus = focus?.consensus
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center) {
                 Text("\(when) 예보별")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("눌러서 끄고 켜기")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: $showsSources) {
+                    Label("예보별 선", systemImage: "chart.xyaxis.line")
+                        .font(.caption.weight(.semibold))
+                }
+                .toggleStyle(.button)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
             }
             .padding(.horizontal)
             .padding(.top, 12)
             .padding(.bottom, 4)
-            ValueRow(label: "종합", color: .primary, lineWidth: 4, value: consensus, delta: nil, bold: true)
+            ValueRow(label: "종합", color: showsSources ? .primary : .blue, lineWidth: 4, value: consensus, delta: nil, bold: true)
             ForEach(providers, id: \.self) { provider in
-                let shown = !hidden.contains(provider)
+                let drawn = showsSources && !hidden.contains(provider)
                 let value = focus?.providers[provider]
                 Divider().padding(.leading)
                 Button {
-                    if shown { hidden.insert(provider) } else { hidden.remove(provider) }
+                    toggle(provider)
                 } label: {
                     ValueRow(
                         label: ForecastSourceInfo.label(provider),
                         color: ForecastSourceInfo.color(provider),
                         lineWidth: 3,
-                        value: shown ? value : nil,
-                        delta: shown ? value.flatMap { v in consensus.map { v - $0 } } : nil,
+                        value: value,
+                        delta: value.flatMap { v in consensus.map { v - $0 } },
                         bold: false
                     )
-                    .opacity(shown ? 1 : 0.45)
+                    .opacity(showsSources && !drawn ? 0.45 : 1)
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(shown ? .isSelected : [])
-                .accessibilityHint(shown ? "누르면 그래프에서 숨깁니다" : "누르면 그래프에 다시 보입니다")
+                .accessibilityAddTraits(drawn ? .isSelected : [])
+                .accessibilityHint(drawn ? "누르면 그래프에서 숨깁니다" : "누르면 그래프에 이 예보 선을 보입니다")
             }
-            Divider()
-            HStack(spacing: 16) {
-                LegendSwatch(label: "예보 범위") {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.2)).frame(width: 14, height: 10)
+            if showsSources {
+                Divider()
+                HStack(spacing: 16) {
+                    LegendSwatch(label: "예보 범위") {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.2)).frame(width: 14, height: 10)
+                    }
+                    LegendSwatch(label: "비 구간") {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.blue.opacity(0.12)).frame(width: 14, height: 10)
+                    }
+                    LegendSwatch(label: "맨 위 띠: 차이 40%p↑") {
+                        RoundedRectangle(cornerRadius: 1).fill(Color.primary.opacity(0.35)).frame(width: 14, height: 4)
+                    }
                 }
-                LegendSwatch(label: "비 구간") {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.blue.opacity(0.12)).frame(width: 14, height: 10)
-                }
-                LegendSwatch(label: "맨 위 띠: 차이 40%p↑") {
-                    RoundedRectangle(cornerRadius: 1).fill(Color.primary.opacity(0.35)).frame(width: 14, height: 4)
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .transition(.opacity)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
-            .padding(.vertical, 10)
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// 예보별 선이 꺼져 있으면 켜고 그 예보를 보이게, 켜져 있으면 그 선만 끄고 켠다
+    private func toggle(_ provider: String) {
+        if !showsSources {
+            showsSources = true
+            hidden.remove(provider)
+        } else if hidden.contains(provider) {
+            hidden.remove(provider)
+        } else {
+            hidden.insert(provider)
+        }
     }
 }
 
@@ -203,22 +127,10 @@ private struct ValueRow: View {
     }
 }
 
-private struct LegendSwatch<Swatch: View>: View {
-    let label: String
-    @ViewBuilder let swatch: () -> Swatch
-
-    var body: some View {
-        HStack(spacing: 6) {
-            swatch()
-            Text(label)
-        }
-    }
-}
-
-/// 의견이 갈리는 시간. 누르면 그 시간을 고른다.
-private struct DisagreementList: View {
+/// 의견이 갈리는 시간. 누르면 그 시간과 예보를 고른다.
+struct DisagreementList: View {
     let disagreements: [CompareChartModel.Disagreement]
-    let select: (Int) -> Void
+    let select: (CompareChartModel.Disagreement) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -237,7 +149,7 @@ private struct DisagreementList: View {
                 ForEach(Array(disagreements.enumerated()), id: \.offset) { _, item in
                     Divider()
                     Button {
-                        select(item.span.start)
+                        select(item)
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "arrow.left.and.right")
@@ -264,7 +176,8 @@ private struct DisagreementList: View {
     }
 }
 
-private struct HeatmapView: View {
+/// 표: 예보 × 시간 강수확률(색은 등급). 왼쪽 행 이름은 고정하고 시간만 가로로 넘긴다
+struct HeatmapView: View {
     let model: HeatmapModel
 
     private let cellWidth: CGFloat = 34
@@ -353,7 +266,8 @@ private struct HeatCell: View {
     }
 }
 
-private struct Legend: View {
+/// 표 범례: 등급 색과 종합·합의·↔ 설명
+struct HeatmapLegend: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
