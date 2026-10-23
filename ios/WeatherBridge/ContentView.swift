@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import WeatherCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
