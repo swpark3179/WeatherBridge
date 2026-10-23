@@ -2,7 +2,8 @@ import SwiftUI
 import WeatherCore
 
 /// 위치 검색 시트: 현재 위치(선택) 또는 주소·장소 검색. 줄을 누르면 좌표를 받아 `onPick`에 넘기고 닫힌다.
-/// 좌표를 받는 동안 다른 줄은 막고, 그 사이 닫으면 결과를 버린다.
+/// 좌표를 받는 동안 다른 줄은 막고, 그 사이 닫으면 결과를 버린다. 지도가 바로 찾지 못해 넓혀 찾는 동안은
+/// 줄 아래에 "주변 주소로 찾는 중…"을 보인다.
 struct PlaceSearchSheet: View {
     let options: PlaceSearchOptions
     let onPick: (PickedPlace) -> Void
@@ -15,6 +16,8 @@ struct PlaceSearchSheet: View {
     @State private var resolving: String?
     @State private var task: Task<Void, Never>?
     @State private var error: String?
+    /// 좌표를 받는 데 오래 걸린다 (넓혀 찾는 중)
+    @State private var slow = false
 
     private static let currentLocationID = "current-location"
 
@@ -79,6 +82,12 @@ struct PlaceSearchSheet: View {
         .task { searchPresented = true }
         .onDisappear { task?.cancel() }
         .onChange(of: search.query) { error = nil }
+        .task(id: resolving) {
+            slow = false
+            guard resolving != nil else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { slow = true }
+        }
     }
 
     /// 검색 중, 결과 없음, 검색 실패, 처음 안내
@@ -116,10 +125,14 @@ struct PlaceSearchSheet: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(.primary)
-                if !subtitle.isEmpty {
+                if resolving == id, slow, id != Self.currentLocationID {
+                    Text("주변 주소로 찾는 중…").font(.caption).foregroundStyle(.secondary)
+                        .transition(.opacity)
+                } else if !subtitle.isEmpty {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .motion(value: slow)
             Spacer(minLength: 4)
             if resolving == id {
                 ProgressView()
