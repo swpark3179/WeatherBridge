@@ -4,6 +4,7 @@ import { MemoryRepo } from "../supabase/functions/_shared/db.ts";
 import type { ProviderForecast, ProviderId } from "../supabase/functions/_shared/forecast_types.ts";
 import { PROVIDER_FAMILY } from "../supabase/functions/_shared/forecast_types.ts";
 import {
+  aroundDays,
   buildToday,
   dailyRain,
   type LoadedPlace,
@@ -406,4 +407,117 @@ Deno.test("daily rain splits days at local midnight across a DST change", () => 
   assertEquals(days[0].date, Date.UTC(2026, 9, 30, 4) / 1000);
   assertEquals(days[2].date, Date.UTC(2026, 10, 1, 4) / 1000);
   assertEquals(days[3].date, Date.UTC(2026, 10, 2, 5) / 1000);
+});
+
+Deno.test("today response carries yesterday, today and tomorrow around now", () => {
+  const r = buildToday(sample(), { nowSec: NOW, tz: "Asia/Seoul", threshold: 30, horizonHours: 4 });
+  const [yesterday, today, tomorrow] = r.places[0].around;
+  assertEquals(r.places[0].around.map((d) => d.start), [
+    kst(2026, 10, 19, 0),
+    kst(2026, 10, 20, 0),
+    kst(2026, 10, 21, 0),
+  ]);
+  // 어제는 지난 날이라 비 소식이 없다. 기온은 ECMWF의 어제 06–09시
+  assertEquals(yesterday.rain, null);
+  assertEquals(yesterday.temps, {
+    providers: ["om_ecmwf"],
+    start: T0 - 24 * H,
+    temps: [17.1, 18, 19.2, 19.9],
+  });
+  // 오늘·내일 비 소식은 7일 보기와 같은 계산
+  assertEquals(today.rain, { pop: 68, agreeing: 4, total: 4, rainy: true });
+  assertEquals(tomorrow.rain, { pop: 17, agreeing: 1, total: 4, rainy: false });
+  // 회사 예보는 오늘 10시에 끝나 그 날 끝까지 닿는 비 소식·기온이 없다
+  for (const day of r.places[1].around) {
+    assertEquals([day.rain, day.cloud, day.snowCm, day.precipMm, day.temps], [
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  }
+});
+
+/** [from, to) 시간별 슬롯: 기온, 운량, 시간당 강수량 */
+function weatherSeries(
+  provider: ProviderId,
+  from: number,
+  to: number,
+  spec: { temp: (t: number) => number; cloud: number; precipMm: number },
+): ProviderForecast {
+  const slots = [];
+  for (let t = from; t < to; t += H) {
+    slots.push({
+      t,
+      pop: 0,
+      span: 1,
+      precipMm: spec.precipMm,
+      temp: spec.temp(t),
+      cloud: spec.cloud,
+      snowCm: 0,
+    });
+  }
+  return { provider, family: PROVIDER_FAMILY[provider], issuedAt: T0, fetchedAt: T0, slots };
+}
+
+const AROUND_MODELS = [
+  weatherSeries("om_ecmwf", ...WIDE, { temp: hourly, cloud: 40, precipMm: 0.2 }),
+  weatherSeries("om_gfs", ...WIDE, { temp: (t) => hourly(t) + 1, cloud: 80, precipMm: 0.4 }),
+  weatherSeries("om_icon", ...WIDE, { temp: (t) => hourly(t) - 0.6, cloud: 60, precipMm: 0 }),
+];
+
+Deno.test("around uses the models that reach each day and carries sky inputs", () => {
+  const opts = { nowSec: NOW, tz: "Asia/Seoul", threshold: 30 };
+  const around = aroundDays(AROUND_MODELS, opts);
+  const days = dailyRain(AROUND_MODELS, opts);
+  assertEquals(
+    around.map((d) => d.temps?.providers),
+    Array(3).fill(["om_ecmwf", "om_gfs", "om_icon"]),
+  );
+  // 오늘·내일 기온은 7일 보기와 같은 값이다
+  assertEquals(around[1].temps, days[0].temps);
+  assertEquals(around[2].temps, days[1].temps);
+  assertEquals(around[0].temps?.start, kst(2026, 10, 19, 0));
+  assertEquals(around[0].temps?.temps.length, 24);
+  // 어제: 비 소식 없이 운량(낮 평균)과 하루 강수량(모델마다 하루 합의 평균 4.8·9.6·0)
+  assertEquals(around[0].rain, null);
+  assertEquals(around[0].cloud, 60);
+  assertEquals(around[0].precipMm, 4.8);
+});
+
+Deno.test("a model without past values drops out of yesterday only", () => {
+  const models = [
+    AROUND_MODELS[0],
+    // GFS는 오늘 0시부터만 값이 있다
+    weatherSeries("om_gfs", kst(2026, 10, 20, 0), WIDE[1], {
+      temp: (t) => hourly(t) + 1,
+      cloud: 80,
+      precipMm: 0.4,
+    }),
+    AROUND_MODELS[2],
+  ];
+  const around = aroundDays(models, { nowSec: NOW, tz: "Asia/Seoul", threshold: 30 });
+  // 앱은 모델 묶음이 다른 어제와 오늘의 차이를 말하지 않는다
+  assertEquals(around[0].temps?.providers, ["om_ecmwf", "om_icon"]);
+  assertEquals(around[1].temps?.providers, ["om_ecmwf", "om_gfs", "om_icon"]);
+});
+
+Deno.test("around follows local days across a DST change", () => {
+  // 뉴욕 11/2 10시(EST). 어제(11/1)는 서머타임이 끝나 25시간이다.
+  const now = Date.UTC(2026, 10, 2, 15) / 1000;
+  const series = tempSeries("om_ecmwf", now - 4 * 24 * H, now + 4 * 24 * H, () => 12);
+  const around = aroundDays([series], { nowSec: now, tz: "America/New_York", threshold: 30 });
+  assertEquals(around[0].start, Date.UTC(2026, 10, 1, 4) / 1000);
+  assertEquals(around[0].temps?.temps.length, 25);
+  assertEquals(around[1].start, Date.UTC(2026, 10, 2, 5) / 1000);
+  assertEquals(around[1].temps?.temps.length, 24);
+});
+
+Deno.test("around starts at local midnight in half-hour zones", () => {
+  // 콜카타(+5:30) 10/20 02:40. 현지 자정은 정시가 아니라 기온은 다음 정시부터다.
+  const series = tempSeries("om_ecmwf", ...WIDE, () => 28);
+  const around = aroundDays([series], { nowSec: NOW, tz: "Asia/Kolkata", threshold: 30 });
+  assertEquals(around[1].start, Date.UTC(2026, 9, 19, 18, 30) / 1000);
+  assertEquals(around[1].temps?.start, around[1].start + 1800);
 });

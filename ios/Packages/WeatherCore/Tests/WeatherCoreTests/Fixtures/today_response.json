@@ -277,6 +277,53 @@
           "rainy": true,
           "temps": null
         }
+      ],
+      "around": [
+        {
+          "start": 1792335600,
+          "rain": null,
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": {
+            "providers": [
+              "om_ecmwf"
+            ],
+            "start": 1792357200,
+            "temps": [
+              17.1,
+              18,
+              19.2,
+              19.9
+            ]
+          }
+        },
+        {
+          "start": 1792422000,
+          "rain": {
+            "pop": 68,
+            "agreeing": 4,
+            "total": 4,
+            "rainy": true
+          },
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": null
+        },
+        {
+          "start": 1792508400,
+          "rain": {
+            "pop": 17,
+            "agreeing": 1,
+            "total": 4,
+            "rainy": false
+          },
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": null
+        }
       ]
     },
     {
@@ -397,7 +444,33 @@
       ],
       "tempHistory": null,
       "recentTemps": [],
-      "days": []
+      "days": [],
+      "around": [
+        {
+          "start": 1792335600,
+          "rain": null,
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": null
+        },
+        {
+          "start": 1792422000,
+          "rain": null,
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": null
+        },
+        {
+          "start": 1792508400,
+          "rain": null,
+          "cloud": null,
+          "snowCm": null,
+          "precipMm": null,
+          "temps": null
+        }
+      ]
     }
   ]
 }

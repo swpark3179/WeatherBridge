@@ -220,13 +220,16 @@ Deno.test("far days use only the models that reach the whole day", () => {
   assertEquals(d23.home!.rain!.total, 3);
 });
 
-Deno.test("cloud is the daytime mean; snow is summed per model and averaged", () => {
+Deno.test("cloud is the daytime mean; snow and precipitation are summed per model and averaged", () => {
   const sapporo = buildTrips(sample(), OPTS).trips[1];
   assertEquals(sapporo.days[0].destination!.cloud, 20);
   assertEquals(sapporo.days[1].destination!.cloud, 95);
   assertEquals(sapporo.days[0].destination!.snowCm, 0);
   // 시간당 0.1cm × 24시간
   assertEquals(sapporo.days[1].destination!.snowCm, 2.4);
+  // 강수확률 50% 이상인 날은 시간당 1mm × 24시간
+  assertEquals(sapporo.days[0].destination!.precipMm, 0);
+  assertEquals(sapporo.days[1].destination!.precipMm, 24);
 
   // 운량이 없는(옛 캐시) 예보면 null
   const loaded = sample();
@@ -239,6 +242,8 @@ Deno.test("cloud is the daytime mean; snow is summed per model and averaged", ()
   );
   const bare = buildTrips(loaded, OPTS).trips[1].days[0].destination!;
   assertEquals([bare.cloud, bare.snowCm], [null, null]);
+  // 강수량은 운량·적설 전부터 받던 값이라 그대로 있다
+  assertEquals(bare.precipMm, 0);
 });
 
 Deno.test("home carries its recent temperatures per Open-Meteo model", () => {
@@ -267,9 +272,10 @@ Deno.test("a destination behind home keeps its today; home has no rain for its p
   assertEquals(day19.date, "2026-10-19");
   // 호놀룰루는 아직 10/19 11시: 남은 시간의 비 소식
   assertEquals(day19.destination!.rain!.total, 1);
-  // 서울의 10/19는 지났다: 기온은 있지만 비 소식은 없다
+  // 서울의 10/19는 지났다: 기온은 있지만 비 소식은 없다. 하늘은 운량·강수량으로 정한다
   assertEquals(day19.home!.rain, null);
   assert(day19.home!.temps !== null);
+  assertEquals([day19.home!.cloud, day19.home!.precipMm], [40, 0]);
   assertEquals(day20.destination!.rain!.pop, 60);
 });
 

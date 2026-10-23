@@ -3,7 +3,7 @@
  * 기온은 지난 값도 주는 Open-Meteo 모델끼리만 평균하고, 쓴 모델을 함께 싣는다(D21·D24).
  */
 import { aggregateDay } from "./aggregate.ts";
-import type { ProviderForecast, ProviderId } from "./forecast_types.ts";
+import type { HourSlot, ProviderForecast, ProviderId } from "./forecast_types.ts";
 import { OPEN_METEO_MODELS } from "./providers/open_meteo.ts";
 import { addDays, type LocalDate, parseLocalDate, zonedEpoch } from "./schedule.ts";
 
@@ -51,6 +51,8 @@ export interface TripDayWeather {
   cloud: number | null;
   /** 하루 적설(cm), 모델 평균 */
   snowCm: number | null;
+  /** 하루 강수량(mm), 모델 평균. 비 소식이 없는 지난 날(어제)의 하늘에 쓴다 */
+  precipMm: number | null;
   /** 0–24시 시간별 기온. 그 날 끝까지 닿는 Open-Meteo 모델의 평균 (providers에 쓴 모델) */
   temps: TempHistory | null;
 }
@@ -167,7 +169,8 @@ export class DayWeatherBuilder {
       start,
       rain,
       cloud: daytimeCloud(covering, hours, start),
-      snowCm: dailySnow(covering, hours),
+      snowCm: dailySum(covering, hours, (s) => s.snowCm),
+      precipMm: dailySum(covering, hours, (s) => s.precipMm),
       temps,
     };
   }
@@ -189,12 +192,17 @@ function daytimeCloud(models: ProviderForecast[], hours: number[], start: number
   return Math.round(means.reduce((a, b) => a + b, 0) / means.length);
 }
 
-/** 모델마다 하루 적설 합(값이 충분한 모델만)을 구해 평균 (cm, 소수 첫째 자리) */
-function dailySnow(models: ProviderForecast[], hours: number[]): number | null {
+/** 모델마다 하루 합(적설·강수량, 값이 충분한 모델만)을 구해 평균 (소수 첫째 자리) */
+function dailySum(
+  models: ProviderForecast[],
+  hours: number[],
+  pick: (slot: HourSlot) => number | null | undefined,
+): number | null {
   const wanted = new Set(hours);
   const sums: number[] = [];
   for (const f of models) {
-    const values = f.slots.filter((s) => wanted.has(s.t) && s.snowCm != null).map((s) => s.snowCm!);
+    const values = f.slots.filter((s) => wanted.has(s.t)).map(pick)
+      .filter((v): v is number => v != null);
     if (values.length > 0 && values.length >= hours.length * MIN_COVERAGE) {
       sums.push(values.reduce((a, b) => a + b, 0));
     }

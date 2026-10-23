@@ -1,5 +1,5 @@
 /**
- * 앱 "오늘"·"비교" 화면과 요약 알림이 쓰는 사용자별 예보 묶음.
+ * 앱 "날씨"·"기온" 탭, 비 상세와 요약 알림이 쓰는 사용자별 예보 묶음.
  * 응답 형식은 ios/Packages/WeatherCore의 TodayResponse와 같고, 계약 샘플
  * ios/Packages/WeatherCore/Tests/WeatherCoreTests/Fixtures/today_response.json을 양쪽 테스트가 검증한다.
  * 좌표는 싣지 않는다.
@@ -9,14 +9,16 @@ import { type Briefing, buildBriefing, restOfLocalDay } from "./briefing.ts";
 import type { Place, PlaceKind } from "./db.ts";
 import {
   coveringDay,
+  DayWeatherBuilder,
   meanTempSeries,
   OPEN_METEO_PROVIDERS,
   openMeteoReach,
   type TempHistory,
+  type TripDayWeather,
 } from "./day_weather.ts";
 import { type Deps, ensureForecasts } from "./forecast_service.ts";
 import type { Family, ProviderForecast, ProviderId } from "./forecast_types.ts";
-import { addDays, localDateOf, zonedEpoch } from "./schedule.ts";
+import { addDays, formatLocalDate, localDateOf, zonedEpoch } from "./schedule.ts";
 
 export const DEFAULT_THRESHOLD = 30;
 const HORIZON_HOURS = 48;
@@ -26,6 +28,8 @@ export const TEMP_HISTORY_DAYS = 7;
 export const DAILY_DAYS = 7;
 /** 7일 보기 기온 비교의 기준 날 수(어제·그제·3일 전). 앱 HomeBaseline.days와 같다 */
 export const RECENT_DAYS = 3;
+/** 기온 탭 3일 보기: 오늘에서 앞뒤 날 (어제·오늘·내일) */
+export const AROUND_DAYS = [-1, 0, 1] as const;
 
 export interface LoadedPlace {
   place: Place;
@@ -66,6 +70,11 @@ export interface TodayPlace {
   recentTemps: TempHistory[];
   /** 7일 보기: 오늘부터 날짜별 비 소식과 하루 기온. 쓸 비 예보가 없는 날은 빠진다 */
   days: TodayDay[];
+  /**
+   * 기온 탭 3일 보기: 어제·오늘·내일(응답 시간대)의 하루 날씨. 여행 날짜와 같은 계산(DayWeatherBuilder)이고
+   * 늘 3개다. 어제는 지난 날이라 rain이 null이고, 하늘은 운량·강수량(precipMm)으로 정한다.
+   */
+  around: TripDayWeather[];
 }
 
 /** 하루 비 소식 (aggregate.ts aggregateDay)과 하루 기온. 시간대 없이 그 날 비가 오는지만 본다. */
@@ -169,6 +178,16 @@ export function dailyRain(
   return days;
 }
 
+/** 어제·오늘·내일 하루 날씨 (기온 탭 3일 보기) */
+export function aroundDays(
+  forecasts: ProviderForecast[],
+  opts: { nowSec: number; tz: string; threshold: number },
+): TripDayWeather[] {
+  const builder = new DayWeatherBuilder(forecasts, opts);
+  const today = localDateOf(opts.nowSec, opts.tz);
+  return AROUND_DAYS.map((d) => builder.day(formatLocalDate(addDays(today, d))));
+}
+
 /** 오늘 남은 시간 브리핑 (요약 알림 문구) */
 export function userBriefing(
   loaded: LoadedPlace[],
@@ -229,6 +248,7 @@ export function buildToday(
         tempHistory: tempHistory(forecasts, opts),
         recentTemps: recentTemps(forecasts, opts),
         days: dailyRain(forecasts, opts),
+        around: aroundDays(forecasts, opts),
       };
     }),
   };
