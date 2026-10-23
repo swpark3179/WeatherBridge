@@ -8,8 +8,13 @@
  * - 집의 지난 기온은 모델별로 싣는다. 앱이 그 날과 같은 모델 묶음으로 기준을 만들어 모델 간 치우침을 뺀다.
  * 좌표는 싣지 않는다.
  */
-import { aggregateDay } from "./aggregate.ts";
 import type { Place, Trip } from "./db.ts";
+import {
+  DayWeatherBuilder,
+  OPEN_METEO_PROVIDERS,
+  type TempHistory,
+  type TripDayWeather,
+} from "./day_weather.ts";
 import {
   type Deps,
   ensureForecasts,
@@ -18,49 +23,8 @@ import {
   openMeteoLocKey,
 } from "./forecast_service.ts";
 import type { ProviderForecast } from "./forecast_types.ts";
-import {
-  addDays,
-  formatLocalDate,
-  type LocalDate,
-  localDateOf,
-  parseLocalDate,
-  zonedEpoch,
-} from "./schedule.ts";
-import {
-  coveringDay,
-  type ModelReach,
-  OPEN_METEO_PROVIDERS,
-  openMeteoReach,
-  type TempHistory,
-  tempHistory,
-} from "./today.ts";
-
-/** 하늘 상태에 쓰는 낮 시간 (현지 시, 끝 제외) */
-export const DAYTIME_HOURS = { from: 8, to: 20 } as const;
-/** 운량·적설은 그 시간의 이 비율 이상 값이 있을 때만 구한다 */
-const MIN_COVERAGE = 0.75;
-
-export interface TripRain {
-  /** 계열마다 그 날 최고 강수확률의 가중 평균 (aggregateDay) */
-  pop: number;
-  agreeing: number;
-  total: number;
-  rainy: boolean;
-}
-
-/** 한 장소의 하루 날씨. 하루 경계는 그 장소의 시간대다. */
-export interface TripDayWeather {
-  /** 그 장소 현지 날짜의 0시 (epoch 초) */
-  start: number;
-  /** 남은 시간의 비 소식. 이미 지난 날이거나 예보가 닿지 않으면 null */
-  rain: TripRain | null;
-  /** 낮(DAYTIME_HOURS) 평균 운량(%) */
-  cloud: number | null;
-  /** 하루 적설(cm), 모델 평균 */
-  snowCm: number | null;
-  /** 0–24시 시간별 기온. 그 날 끝까지 닿는 Open-Meteo 모델의 평균 (providers에 쓴 모델) */
-  temps: TempHistory | null;
-}
+import { addDays, formatLocalDate, localDateOf, parseLocalDate } from "./schedule.ts";
+import { tempHistory } from "./today.ts";
 
 export interface TripDay {
   /** 여행 날짜 "YYYY-MM-DD" (목적지 달력). 집도 같은 달력 날짜를 집 시간대로 본다. */
@@ -106,86 +70,6 @@ function phaseOf(trip: Trip, nowSec: number): Phase {
 }
 
 const PHASE_ORDER: Record<Phase, number> = { ongoing: 0, upcoming: 1, ended: 2 };
-
-/** 한 장소의 예보로 날짜별 하루 날씨를 만든다. 같은 날짜는 한 번만 계산한다. */
-export class DayWeatherBuilder {
-  private readonly models: ModelReach[];
-  private readonly memo = new Map<string, TripDayWeather>();
-
-  constructor(
-    private readonly forecasts: ProviderForecast[],
-    private readonly opts: { tz: string; nowSec: number; threshold: number },
-  ) {
-    this.models = openMeteoReach(forecasts);
-  }
-
-  day(date: string): TripDayWeather {
-    let weather = this.memo.get(date);
-    if (!weather) {
-      weather = this.build(parseLocalDate(date));
-      this.memo.set(date, weather);
-    }
-    return weather;
-  }
-
-  private build(date: LocalDate): TripDayWeather {
-    const { tz, nowSec, threshold } = this.opts;
-    const start = zonedEpoch(date, 0, 0, tz);
-    const end = zonedEpoch(addDays(date, 1), 0, 0, tz);
-
-    const from = Math.max(start, Math.floor(nowSec / 3600) * 3600);
-    let rain: TripRain | null = null;
-    if (from < end) {
-      const agg = aggregateDay(this.forecasts, { from, to: end, threshold });
-      if (agg.pop !== null) {
-        rain = { pop: agg.pop, agreeing: agg.agreeing, total: agg.total, rainy: agg.rainy };
-      }
-    }
-
-    // 그 날 마지막 정시까지 기온이 있는 모델만 (먼 날일수록 줄어든다)
-    const { covering, temps } = coveringDay(this.models, { from: start, to: end });
-    const hours: number[] = [];
-    for (let t = Math.ceil(start / 3600) * 3600; t < end; t += 3600) hours.push(t);
-
-    return {
-      start,
-      rain,
-      cloud: daytimeCloud(covering, hours, start),
-      snowCm: dailySnow(covering, hours),
-      temps,
-    };
-  }
-}
-
-/** 낮 시간마다 모델 평균 운량을 구하고, 그 평균. 값이 있는 시간이 모자라면 null */
-function daytimeCloud(models: ProviderForecast[], hours: number[], start: number): number | null {
-  const daytime = hours.filter((t) => {
-    const h = (t - start) / 3600;
-    return h >= DAYTIME_HOURS.from && h < DAYTIME_HOURS.to;
-  });
-  const bySlot = models.map((f) => new Map(f.slots.map((s) => [s.t, s.cloud ?? null])));
-  const means: number[] = [];
-  for (const t of daytime) {
-    const values = bySlot.map((m) => m.get(t)).filter((v): v is number => v != null);
-    if (values.length > 0) means.push(values.reduce((a, b) => a + b, 0) / values.length);
-  }
-  if (means.length === 0 || means.length < daytime.length * MIN_COVERAGE) return null;
-  return Math.round(means.reduce((a, b) => a + b, 0) / means.length);
-}
-
-/** 모델마다 하루 적설 합(값이 충분한 모델만)을 구해 평균 (cm, 소수 첫째 자리) */
-function dailySnow(models: ProviderForecast[], hours: number[]): number | null {
-  const wanted = new Set(hours);
-  const sums: number[] = [];
-  for (const f of models) {
-    const values = f.slots.filter((s) => wanted.has(s.t) && s.snowCm != null).map((s) => s.snowCm!);
-    if (values.length > 0 && values.length >= hours.length * MIN_COVERAGE) {
-      sums.push(values.reduce((a, b) => a + b, 0));
-    }
-  }
-  if (sums.length === 0) return null;
-  return Math.round(sums.reduce((a, b) => a + b, 0) / sums.length * 10) / 10;
-}
 
 /** 여행 날짜 중 아직 지나지 않은 날. 집·목적지 중 날짜가 이른 쪽의 오늘부터 (예: 서울에서 본 호놀룰루 어제) */
 function remainingDates(trip: Trip, home: Place | null, nowSec: number): string[] {
