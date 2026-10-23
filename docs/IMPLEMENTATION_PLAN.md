@@ -63,7 +63,7 @@ WeatherBridge/
 │     ├─ migrations/           스키마, RLS, pg_cron 잡
 │     └─ functions/
 │        ├─ _shared/providers/ kma.ts(단기예보·실황), open_meteo.ts, (이후) weatherkit.ts, ...
-│        ├─ _shared/           apns.ts, kma_time.ts, kma_grid.ts, forecast_types.ts, aggregate.ts,
+│        ├─ _shared/           apns.ts, kma_time.ts, kma_grid.ts, forecast_types.ts, aggregate.ts, day_weather.ts,
 │        │                     briefing.ts, forecast_service.ts, db.ts, (이후) schedule.ts, quota.ts
 │        ├─ refresh/           cron: 등록 위치별 예보 수집 → forecast_cache, 예보·관측 로그
 │        ├─ forecast/          장소별 종합 예보 (캐시만 읽음)
@@ -132,13 +132,16 @@ WeatherBridge/
 ### Phase 2 — 앱 MVP + 지정 시각 요약 알림 ← 진행 중
 - 진행 순서: A 배포 파이프라인(TestFlight) → B 서버(사용자·기기·`today`·`dispatch`) → C1 앱 로그인·온보딩·설정·알림 → C2 오늘·비교 화면.
 - 진행 상황: A(#6)·B(#7)·C1(#8)·C2(#9) 병합, 서버 배포 완료(실서버 익명 흐름 확인), TestFlight 업로드 성공(#10–#12에서 서명·버전 설정 수정). 남은 확인: 실기기에서 요약 알림 ±1분 수신(`Device check`, [spikes.md](spikes.md) "Phase 2 실기기 확인"), S2·S3.
+- 탭 재구성(D29): 오늘·비교 → **날씨·기온**. 비교 화면은 비 상세의 "예보별"로 합쳤다.
 1. 익명 로그인 + 기기 등록(APNs 토큰·apns_env, 재설치 대비 복구 코드), 온보딩: 집·회사 위치(현재 위치 / Apple 지도 주소·장소 검색, [decisions.md](decisions.md) D20). 위치는 지도 핀 카드로 보이고, 누르면 검색 시트가 열려 고르면 닫히며 카드가 바뀐다. 이 기기에서 고른 위치는 다시 열 때 그대로 보인다(D27).
-2. **오늘 화면**: 집·회사 카드 — 시간대별 강수확률 막대(등급 색), 비 구간 강조 배너, 기온·하늘 보조, 갱신 시각.
-   - **기온 비교**: 기준은 늘 **최근 3일**(어제·그제·3일 전, 여행 탭의 "지금"과 같음). 카드 맨 아래 줄은 24시간 보기면 "지금 최근 3일보다 3° 낮아요", 7일 보기면 "최근 3일보다 조금 추워요"이고, 누르면 같은 보기로 기온 비교가 열린다. `[오늘 | 7일]` 전환:
-     - 오늘: 오늘(0–24시) 시간별 기온을 같은 시각과 비교(그래프·최고/최저·시간별 차이). 서버 `today`의 `tempHistory`(7일 전 자정~오늘 자정), `WeatherCore.TemperatureComparisonModel`([decisions.md](decisions.md) D21).
+2. **날씨 탭**: 맨 위 한 줄 요약과 `[24시간 | 7일]`, 집·회사 요약 칸(`WeatherCore.PlaceGlance`: 지금 기온, 다음 비, 최대 강수확률), 그 아래 고른 장소 카드 한 장(좌우로 넘김, 칸 테두리가 손가락을 따라감).
+   - 24시간: 다음 비 시각, 비 구간 칩, 시간대별 강수확률 막대(등급 색) 위에 **기온 선**(단조 곡선, 3시간마다·최고·최저 숫자, `RainTimelineModel`). 꾹 눌러 밀면 그 시각 말풍선("16시 · 70% · 19°")과 햅틱.
+   - 7일: 시간대 없이 날짜마다 비 여부·강수확률(계열별 그 날 최고값의 종합)과 비 오는 날 요약. 서버 `today`가 장소별 `days`(오늘부터 7일)를 싣고, 문구는 `WeatherCore.WeekRainModel`([decisions.md](decisions.md) D22).
+   - 카드 맨 아래 기온 줄("지금 어제보다 3° 낮아요", 7일 보기면 "최근 3일보다 조금 추워요")을 누르면 기온 탭의 그 장소·보기로 간다.
+   - **기온 탭** `[어제·오늘·내일 | 7일]`(D29):
+     - 어제·오늘·내일: 지금과 어제·내일 같은 시각, 날짜 카드 3장(날씨 장면, 최고·최저가 전날 값에서 굴러감, 전날과 최고끼리·최저끼리), 어제 0시–내일 24시 시간별 기온 그래프. 서버 `today`의 `around`(여행 날짜와 같은 하루 날씨), `WeatherCore.ThreeDayTemperatureModel`.
      - 7일: 오늘부터 날짜별 최고·최저를 최근 3일 평균 최고·최저와 비교(최고끼리·최저끼리, 막대와 차이, 가장 추운·더운 날). 서버 `today`의 `days[].temps`(그 날 끝까지 닿는 모델 평균)와 `recentTemps`(모델별 최근 3일), `WeatherCore.WeekTemperatureModel`([decisions.md](decisions.md) D26).
-   - **24시간 ↔ 7일 보기**: 맨 위 요약 아래 `[24시간 | 7일]` 전환. 7일 보기는 시간대 없이 날짜마다 비 여부·강수확률(계열별 그 날 최고값의 종합)과 비 오는 날 요약. 서버 `today`가 장소별 `days`(오늘부터 7일)를 싣고, 문구는 `WeatherCore.WeekRainModel`([decisions.md](decisions.md) D22).
-3. **비교 화면(기본)**: 소스×시간 히트맵, 종합·편차·합의도.
+3. **비 상세**: 비 구간, 예보 카드 `[24 | 48시간]`·`[그래프 | 표]`(종합 선과 예보 범위, "예보별 선"을 켜면 예보마다 선과 의견 갈림 띠, 표는 소스×시간 히트맵), 고른 시간의 예보별 값, 의견이 갈리는 시간, 시간별 목록.
 4. 설정: 출근시간·요일, 요약 시각, 강수 임계값, 데이터 출처 표기(Open-Meteo CC BY, WeatherKit 로고·법적 링크 등).
 5. **요약 알림**: `dispatch`가 요약 시각에 APNs 알림(서버 생성 문구) 발송, `dispatch_log`로 중복 방지.
 6. 배포: CI 서명 + TestFlight 업로드 파이프라인(개발자 계정 필요), 앱 아이콘.
