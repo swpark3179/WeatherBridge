@@ -345,13 +345,17 @@ public struct WeekRainModel: Sendable, Equatable {
     }
 }
 
-/// 오늘 카드의 24시간 막대: 막대, 비 구간 괄호, 시각 눈금, 지금·자정·출근 위치.
+/// 날씨 탭 카드의 24시간 막대와 기온 선: 막대, 비 구간 괄호, 시각 눈금, 지금·자정·출근 위치, 기온 선과 라벨.
 /// 위치는 막대 칸 단위(0 = 첫 막대의 왼쪽 끝, `bars.count` = 오른쪽 끝)다.
 public struct RainTimelineModel: Sendable, Equatable {
     public struct Bar: Sendable, Equatable {
         public let t: Int
         public let pop: Int
         public let level: RainLevel
+        /// 기온 (기상청 우선, 카드 머리와 같은 값)
+        public let temp: Double?
+        /// "16시", 내일이면 "내일 3시"
+        public let timeText: String
     }
 
     public struct Bracket: Sendable, Equatable {
@@ -370,6 +374,33 @@ public struct RainTimelineModel: Sendable, Equatable {
         public let isDayStart: Bool
     }
 
+    /// 기온 선의 점 하나. 선은 막대 가운데를 지난다
+    public struct TempPoint: Sendable, Equatable {
+        /// 막대 순번
+        public let index: Int
+        public let temp: Double
+        /// 단조 곡선의 기울기 (°/칸, `MonotoneCurve`)
+        public let slope: Double
+
+        public var position: Double { Double(index) + 0.5 }
+    }
+
+    /// 기온 라벨: 3시간 눈금 자리와 최고·최저
+    public struct TempLabel: Sendable, Equatable {
+        public enum Kind: Sendable, Equatable {
+            case tick, high, low
+        }
+
+        /// 막대 순번
+        public let index: Int
+        public let temp: Double
+        public let kind: Kind
+
+        public var position: Double { Double(index) + 0.5 }
+        /// "18°"
+        public var text: String { "\(Int(temp.rounded()))°" }
+    }
+
     public let bars: [Bar]
     public let brackets: [Bracket]
     public let ticks: [Tick]
@@ -377,11 +408,26 @@ public struct RainTimelineModel: Sendable, Equatable {
     /// 날짜가 바뀌는 위치 (없으면 nil)
     public let midnight: Double?
     public let commutes: [Double]
+    /// 기온 선 세로 범위: 위아래 1° 여유, 4° 이상, 정수. 기온이 두 시간 미만이면 nil(선을 그리지 않는다)
+    public let tempScale: ClosedRange<Double>?
+    /// 기온 선: 값이 이어지는 구간마다 따로 (빈 시간에서 끊는다)
+    public let tempSegments: [[TempPoint]]
+    /// 기온 숫자를 붙일 자리 (막대 순서)
+    public let tempLabels: [TempLabel]
 
     public init(place: TodayPlace, tz: String, now: Int, hours: Int = 24, commuteTimes: [Int] = []) {
         let clock = LocalClock(tz: tz)
         let slice = place.upcoming(hours: hours, now: now)
-        bars = slice.map { Bar(t: $0.t, pop: $0.consensus ?? 0, level: RainLevel(pop: $0.consensus ?? 0)) }
+        let bars = slice.map {
+            Bar(
+                t: $0.t,
+                pop: $0.consensus ?? 0,
+                level: RainLevel(pop: $0.consensus ?? 0),
+                temp: $0.temp,
+                timeText: clock.compactWindowText(start: $0.t, end: $0.t + 3600, now: now)
+            )
+        }
+        self.bars = bars
         let origin = slice.first?.t ?? now - now % 3600
         let count = Double(slice.count)
         func position(_ epoch: Int) -> Double { Double(epoch - origin) / 3600 }
@@ -392,19 +438,194 @@ public struct RainTimelineModel: Sendable, Equatable {
             guard end > start else { return nil }
             return Bracket(window: index, start: start, end: end, label: clock.spanText(start: w.start, end: w.end))
         }
-        ticks = slice.enumerated().compactMap { index, hour in
+        let tickIndices = slice.indices.filter { clock.hour(slice[$0].t) % 3 == 0 }
+        ticks = tickIndices.map { index in
+            let hour = slice[index]
             let h = clock.hour(hour.t)
-            guard h % 3 == 0 else { return nil }
             let dayStart = h == 0 && index > 0
             return Tick(position: Double(index), label: dayStart ? clock.dayLabel(hour.t, from: now) : "\(h)시", isDayStart: dayStart)
         }
         self.now = min(count, max(0, position(now)))
         midnight = slice.dropFirst().first { clock.hour($0.t) == 0 }.map { position($0.t) }
         commutes = commuteTimes.map(position).filter { $0 >= 0 && $0 < count }
+
+        let temps = bars.compactMap(\.temp)
+        if temps.count >= 2, let low = temps.min(), let high = temps.max() {
+            var lower = low - 1
+            var upper = high + 1
+            if upper - lower < 4 {
+                let pad = (4 - (upper - lower)) / 2
+                lower -= pad
+                upper += pad
+            }
+            tempScale = lower.rounded(.down)...upper.rounded(.up)
+            tempSegments = Self.segments(bars)
+            tempLabels = Self.labels(bars, tickIndices: tickIndices)
+        } else {
+            tempScale = nil
+            tempSegments = []
+            tempLabels = []
+        }
+    }
+
+    /// 기온 선 높이 (0 = 아래, 1 = 위)
+    public func tempFraction(_ temp: Double) -> Double? {
+        guard let tempScale, tempScale.upperBound > tempScale.lowerBound else { return nil }
+        return (temp - tempScale.lowerBound) / (tempScale.upperBound - tempScale.lowerBound)
+    }
+
+    /// 밀어서 고른 위치(막대 칸 단위)의 막대. 양 끝 밖이면 끝 막대
+    public func barIndex(at position: Double) -> Int? {
+        guard !bars.isEmpty else { return nil }
+        return min(max(Int(position.rounded(.down)), 0), bars.count - 1)
+    }
+
+    /// 말풍선: "16시 70% · 19°" (기온이 없으면 "16시 70%")
+    public func callout(at index: Int) -> String {
+        let bar = bars[index]
+        return "\(bar.timeText) \(bar.pop)%" + (bar.temp.map { " · \(Int($0.rounded()))°" } ?? "")
+    }
+
+    /// VoiceOver: "16시, 강수확률 70%, 기온 19도"
+    public func accessibilityText(at index: Int) -> String {
+        let bar = bars[index]
+        return "\(bar.timeText), 강수확률 \(bar.pop)%" + (bar.temp.map { ", 기온 \(Int($0.rounded()))도" } ?? "")
+    }
+
+    /// 기온이 이어지는 구간마다 점과 단조 곡선 기울기
+    private static func segments(_ bars: [Bar]) -> [[TempPoint]] {
+        var runs: [[(index: Int, temp: Double)]] = []
+        for (index, bar) in bars.enumerated() {
+            guard let temp = bar.temp else { continue }
+            if let last = runs.last?.last, last.index == index - 1 {
+                runs[runs.count - 1].append((index, temp))
+            } else {
+                runs.append([(index, temp)])
+            }
+        }
+        return runs.map { run in
+            let slopes = MonotoneCurve.tangents(run.map { $0.temp })
+            return zip(run, slopes).map { TempPoint(index: $0.0.index, temp: $0.0.temp, slope: $0.1) }
+        }
+    }
+
+    /// 최고·최저(반올림해 같으면 빼고), 그리고 그와 2칸 안에 붙지 않은 3시간 눈금 자리.
+    /// 한 칸이 약 14pt라 "19°"(약 20pt)끼리 겹치지 않으려면 2칸은 떨어져야 한다.
+    private static func labels(_ bars: [Bar], tickIndices: [Int]) -> [TempLabel] {
+        let known = bars.indices.compactMap { index in bars[index].temp.map { (index: index, temp: $0) } }
+        // 같은 값이면 이른 시간
+        guard let highest = known.max(by: { $0.temp < $1.temp }),
+              let lowest = known.min(by: { $0.temp < $1.temp }) else { return [] }
+        var extremes: [TempLabel] = []
+        if Int(highest.temp.rounded()) != Int(lowest.temp.rounded()) {
+            extremes.append(TempLabel(index: highest.index, temp: highest.temp, kind: .high))
+            if abs(lowest.index - highest.index) >= 2 {
+                extremes.append(TempLabel(index: lowest.index, temp: lowest.temp, kind: .low))
+            }
+        }
+        let tickLabels = tickIndices.compactMap { index -> TempLabel? in
+            guard let temp = bars[index].temp,
+                  !extremes.contains(where: { abs($0.index - index) < 2 }) else { return nil }
+            return TempLabel(index: index, temp: temp, kind: .tick)
+        }
+        return (extremes + tickLabels).sorted { $0.index < $1.index }
     }
 }
 
-/// 비교 화면 그래프: 종합·예보별 선, 예보 범위 띠, 비 구간, 의견이 갈리는 시간과 그 설명
+/// 단조 3차 곡선(Fritsch–Carlson): 점마다 기울기를 정해, 점 사이 곡선이 두 값 밖으로 튀어나가지 않게 한다.
+/// 점 사이 간격은 1이다. 그리는 쪽은 점 i와 i+1 사이에 (1/3, m_i/3), (−1/3, −m_{i+1}/3) 조절점을 둔다.
+public enum MonotoneCurve {
+    public static func tangents(_ values: [Double]) -> [Double] {
+        let count = values.count
+        guard count > 1 else { return Array(repeating: 0, count: count) }
+        let steps = (0..<(count - 1)).map { values[$0 + 1] - values[$0] }
+        var slopes = Array(repeating: 0.0, count: count)
+        slopes[0] = steps[0]
+        slopes[count - 1] = steps[count - 2]
+        for index in 1..<(count - 1) {
+            // 오르다 내리는 꼭짓점은 평평하게
+            slopes[index] = steps[index - 1] * steps[index] <= 0 ? 0 : (steps[index - 1] + steps[index]) / 2
+        }
+        for index in 0..<(count - 1) {
+            let step = steps[index]
+            if step == 0 {
+                slopes[index] = 0
+                slopes[index + 1] = 0
+                continue
+            }
+            let a = slopes[index] / step
+            let b = slopes[index + 1] / step
+            let sum = a * a + b * b
+            if sum > 9 {
+                let scale = 3 / sum.squareRoot()
+                slopes[index] = scale * a * step
+                slopes[index + 1] = scale * b * step
+            }
+        }
+        return slopes
+    }
+}
+
+/// 날씨 탭 맨 위 장소 요약 칸: 지금 기온, 다음 비(7일 보기면 비 오는 날), 최대 강수확률
+public struct PlaceGlance: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let kind: PlaceKind
+    public let name: String
+    /// 지금 기온 (기상청 우선, 카드 머리와 같은 값)
+    public let temp: Double?
+    /// "8–10시 비", "지금 비 · 10시까지", "비 소식 없음". 7일 보기면 "오늘·목 비", "7일 비 소식 없음"
+    public let rainText: String
+    public let isRainy: Bool
+    /// 보기 범위(24시간 또는 7일) 안 가장 높은 종합 강수확률
+    public let maxPop: Int
+
+    public var level: RainLevel { RainLevel(pop: maxPop) }
+
+    public init(place: TodayPlace, tz: String, now: Int, week: Bool = false) {
+        let clock = LocalClock(tz: tz)
+        id = place.id
+        kind = place.kind
+        name = place.name
+        temp = place.upcoming(hours: 1, now: now).first?.temp
+        if week {
+            let days = place.upcomingDays(now: now, tz: tz) ?? []
+            let rainy = days.filter(\.rainy)
+            maxPop = days.map(\.pop).max() ?? 0
+            isRainy = !rainy.isEmpty
+            if rainy.isEmpty {
+                rainText = days.isEmpty ? "7일 예보를 받는 중" : "7일 비 소식 없음"
+            } else {
+                rainText = rainy.map { clock.weekDayLabel($0.date, from: now) }.joined(separator: "·") + " 비"
+            }
+            return
+        }
+        maxPop = place.upcoming(hours: 24, now: now).compactMap(\.consensus).max() ?? 0
+        guard let next = place.upcomingWindows(now: now).first else {
+            isRainy = false
+            rainText = "비 소식 없음"
+            return
+        }
+        isRainy = true
+        if next.start <= now {
+            // 자정에 그치면 "24시", 내일 그치면 "내일 2시"
+            let endHour = clock.hour(next.end)
+            let shown = endHour == 0 && clock.minute(next.end) == 0 ? 24 : endHour
+            let prefix = clock.dayOffset(next.end - 1, from: now) >= 1 ? "내일 " : ""
+            rainText = "지금 비 · \(prefix)\(shown)시까지"
+        } else {
+            rainText = "\(clock.compactWindowText(start: next.start, end: next.end, now: now)) 비"
+        }
+    }
+}
+
+extension TodayResponse {
+    /// 날씨 탭 맨 위 장소 요약 (집, 회사 순서)
+    public func glances(now: Int, week: Bool = false) -> [PlaceGlance] {
+        places.map { PlaceGlance(place: $0, tz: tz, now: now, week: week) }
+    }
+}
+
+/// 비 상세의 예보 그래프: 종합·예보별 선, 예보 범위 띠, 비 구간, 의견이 갈리는 시간과 그 설명
 public struct CompareChartModel: Sendable, Equatable {
     public struct Disagreement: Sendable, Equatable {
         public let span: TimeSpan
@@ -490,7 +711,7 @@ public struct CompareChartModel: Sendable, Equatable {
     }
 }
 
-/// 비교 화면 히트맵: 행 = 종합 + 소스, 열 = 시간
+/// 비 상세의 표(히트맵): 행 = 종합 + 소스, 열 = 시간
 public struct HeatmapModel: Sendable, Equatable {
     public struct Row: Sendable, Equatable, Identifiable {
         /// "consensus" 또는 소스 ID

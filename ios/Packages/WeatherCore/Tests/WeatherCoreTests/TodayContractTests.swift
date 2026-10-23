@@ -46,6 +46,16 @@ import Testing
         // 샘플의 기온은 하루 끝까지 닿지 않아 날짜별 기온이 없다
         #expect(days.allSatisfy { $0.temps == nil })
 
+        // 3일 보기: 어제·오늘·내일. 어제는 비 소식이 없고, 기온은 ECMWF의 어제 06–09시뿐이다
+        let around = try #require(home.around)
+        #expect(around.count == 3)
+        #expect(zip(around.dropFirst(), around).allSatisfy { $0.start - $1.start == 86400 })
+        #expect(around[1].start == days[0].date)
+        #expect(around[0].rain == nil)
+        #expect(around[0].temps?.temps == [17.1, 18, 19.2, 19.9])
+        #expect(around[1].rain?.pop == days[0].pop)
+        #expect(around[2].rain?.pop == days[1].pop)
+
         let office = today.places[1]
         #expect(!office.highlight)
         #expect(office.errors == ["om_icon: timeout"])
@@ -53,6 +63,21 @@ import Testing
         #expect(office.tempHistory == nil)
         #expect(office.recentTemps == [])
         #expect(office.days == [])
+        #expect(office.around?.count == 3)
+        #expect(office.around?.allSatisfy { $0.rain == nil && $0.temps == nil && $0.cloud == nil } == true)
+    }
+
+    /// 3일 보기 이전 서버의 응답(또는 저장해 둔 응답)에는 around가 없다
+    @Test func decodesResponsesWithoutAround() throws {
+        var today = try loadFixture()
+        for index in today.places.indices {
+            today.places[index].around = nil
+        }
+        let data = try JSONEncoder().encode(today)
+        #expect(!String(decoding: data, as: UTF8.self).contains("around"))
+        let decoded = try JSONDecoder().decode(TodayResponse.self, from: data)
+        #expect(decoded.places.allSatisfy { $0.around == nil })
+        #expect(ThreeDayTemperatureModel(place: decoded.places[0], tz: decoded.tz, now: decoded.generatedAt) == nil)
     }
 
     /// 기온 비교 이전 서버의 응답(또는 저장해 둔 응답)에는 tempHistory가 없다

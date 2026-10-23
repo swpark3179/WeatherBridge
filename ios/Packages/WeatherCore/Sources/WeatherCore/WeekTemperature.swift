@@ -1,8 +1,8 @@
 import Foundation
 
-/// 기온 비교 화면의 7일 보기: 오늘부터 날짜마다 하루 최고·최저를 최근 3일(어제·그제·3일 전) 평균 최고·최저와 견준다.
+/// 기온 탭의 7일 보기: 오늘부터 날짜마다 하루 최고·최저를 최근 3일(어제·그제·3일 전) 평균 최고·최저와 견준다.
 /// 최고는 최고끼리, 최저는 최저끼리. 그 날 기온은 그 날 끝까지 닿는 예보 모델의 평균이고, 기준도 같은 모델 묶음으로
-/// 만든다(여행 탭과 같은 규칙). 오늘 보기와 같은 모델 묶음인 날은 오늘 보기의 기준을 그대로 써서 두 보기의 숫자가 같다.
+/// 만든다(여행 탭과 같은 규칙). 오늘 줄은 3일 보기의 "오늘" 카드와 같은 값이다(같은 계산).
 public struct WeekTemperatureModel: Sendable, Equatable {
     public struct Day: Sendable, Equatable, Identifiable {
         public var id: Int { date }
@@ -22,11 +22,13 @@ public struct WeekTemperatureModel: Sendable, Equatable {
         public let modelCount: Int
     }
 
-    /// 문장에 쓰는 기준 이름
-    public static let label = TemperatureComparisonModel.label
+    /// 문장에 쓰는 기준 이름: "최근 3일보다 조금 추워요"
+    public static let label = "최근 \(HomeBaseline.days)일"
+    /// 값 옆에 붙이는 기준 이름
+    public static let valueLabel = "최근 \(HomeBaseline.days)일 평균"
 
     public let days: [Day]
-    /// 대표 기준: 오늘 보기와 같은 기준. 없으면 처음으로 기준이 있는 날의 기준
+    /// 대표 기준: 처음으로 기준이 있는 날(대개 오늘)의 기준
     public let baseline: HomeBaseline?
     /// 기준이 있는 날들의 평균 최고·최저와 기준의 비교. 견줄 날이 없으면 nil
     public let outlook: TemperatureOutlook?
@@ -42,10 +44,8 @@ public struct WeekTemperatureModel: Sendable, Equatable {
         let upcoming = place.upcomingDays(now: now, tz: tz) ?? []
         guard upcoming.contains(where: { $0.temps != nil }) else { return nil }
         let clock = LocalClock(tz: tz)
-        let todayStart = clock.startOfDay(now)
-        let today = TemperatureComparisonModel(place: place, tz: tz, now: now)
 
-        // 모델 묶음마다 기준은 한 번만 만든다. 오늘 보기와 같은 묶음이면 오늘 보기와 같은 기록(모델 평균)으로 만든다.
+        // 모델 묶음마다 기준은 한 번만 만든다. 서버가 모델 평균으로 보낸 기록(tempHistory)과 같은 묶음이면 그 기록으로 만든다.
         let mixed = place.tempHistory.map { Set($0.providers) }
         var baselines: [Set<String>: HomeBaseline?] = [:]
         func baselineFor(_ providers: [String]) -> HomeBaseline? {
@@ -63,15 +63,10 @@ public struct WeekTemperatureModel: Sendable, Equatable {
 
         var days: [Day] = []
         for day in upcoming {
+            let providers = day.temps?.providers ?? []
             var high: Double?
             var low: Double?
-            var providers = day.temps?.providers ?? []
-            if day.date == todayStart, let today, today.high != nil, today.low != nil {
-                // 오늘은 오늘 보기의 최고·최저와 같은 값
-                high = today.high?.today
-                low = today.low?.today
-                providers = today.providers
-            } else if let temps = day.temps {
+            if let temps = day.temps {
                 let hours = DayTemperature.hours(from: day.date, to: clock.addingDays(1, to: day.date))
                 let values = hours.map { temps.temp(at: $0) }
                 high = DayTemperature.extreme(values, hours: hours.count) { $0.max() }
@@ -96,7 +91,7 @@ public struct WeekTemperatureModel: Sendable, Equatable {
         }
         guard !days.isEmpty else { return nil }
         self.days = days
-        baseline = today?.daily ?? days.lazy.compactMap(\.baseline).first
+        baseline = days.lazy.compactMap(\.baseline).first
 
         // 기준이 있는 날들의 평균 최고·최저 (여행 전체 비교와 같은 방식)
         let compared = days.filter { $0.baseline != nil }

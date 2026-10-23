@@ -1,15 +1,18 @@
 import Foundation
 
-/// 여행 날 하늘 (장면·아이콘). 비·눈은 그 날 비 소식으로, 나머지는 낮 운량으로 정한다.
+/// 하루 하늘 (장면·아이콘). 비·눈은 그 날 비 소식(지난 날은 하루 강수량)으로, 나머지는 낮 운량으로 정한다.
 public enum TripSky: String, Hashable, Sendable, CaseIterable {
     case clear, partlyCloudy, cloudy, rain, snow
 
     /// 비 오는 날 하루 적설이 이 이상(cm)이면 눈
     public static let snowCm = 0.5
+    /// 비 소식이 없는 지난 날은 하루 강수량이 이 이상(mm)이면 비 온 날로 본다
+    public static let wetDayMm = 1.0
 
-    /// 비 소식도 운량도 없으면 nil
+    /// 비 소식도 강수량도 운량도 없으면 nil
     public init?(_ weather: TripDayWeather) {
-        if let rain = weather.rain, rain.rainy {
+        let wet = weather.rain.map { $0.rainy } ?? weather.precipMm.map { $0 >= Self.wetDayMm } ?? false
+        if wet {
             self = (weather.snowCm ?? 0) >= Self.snowCm ? .snow : .rain
             return
         }
@@ -55,7 +58,7 @@ public struct HomeBaseline: Hashable, Sendable {
         }
     }
 
-    /// 서버가 이미 모델 평균으로 보낸 기록(`TodayPlace.tempHistory`)으로. 오늘 기온 비교의 최고·최저 기준과 같은 값이다.
+    /// 서버가 이미 모델 평균으로 보낸 기록(`TodayPlace.tempHistory`)으로. 7일 보기에서 그 기록과 같은 모델 묶음인 날에 쓴다.
     /// 하루 최고·최저를 구할 만큼 값이 있는 날이 없으면 nil
     public init?(history: TemperatureHistory, tz: String, now: Int) {
         self.init(providers: history.providers, tz: tz, now: now, temp: history.temp(at:))
@@ -140,6 +143,19 @@ public struct TemperatureOutlook: Hashable, Sendable {
     }
 }
 
+extension TripDayWeather {
+    /// 그 날 최고·최저 (시간의 3/4 이상 값이 있을 때). 서머타임 날은 23·25시간이다
+    public func extremes(clock: LocalClock) -> (high: Double?, low: Double?) {
+        guard let temps else { return (nil, nil) }
+        let hours = DayTemperature.hours(from: start, to: clock.addingDays(1, to: start))
+        let values = hours.map { temps.temp(at: $0) }
+        return (
+            DayTemperature.extreme(values, hours: hours.count) { $0.max() },
+            DayTemperature.extreme(values, hours: hours.count) { $0.min() }
+        )
+    }
+}
+
 /// 한 장소의 여행 날 하루
 public struct TripDaySummary: Hashable, Sendable {
     public let weather: TripDayWeather?
@@ -160,14 +176,9 @@ public struct TripDaySummary: Hashable, Sendable {
     /// - Parameter baseline: 모델 묶음 → 집 기준 (TripModel이 묶음마다 한 번만 만든다)
     init(weather: TripDayWeather?, clock: LocalClock, baseline: ([String]) -> HomeBaseline?) {
         self.weather = weather
-        var high: Double?
-        var low: Double?
-        if let weather, let temps = weather.temps {
-            let hours = DayTemperature.hours(from: weather.start, to: clock.addingDays(1, to: weather.start))
-            let values = hours.map { temps.temp(at: $0) }
-            high = DayTemperature.extreme(values, hours: hours.count) { $0.max() }
-            low = DayTemperature.extreme(values, hours: hours.count) { $0.min() }
-        }
+        let extremes = weather?.extremes(clock: clock)
+        let high = extremes?.high
+        let low = extremes?.low
         self.high = high
         self.low = low
         let base = weather?.temps.flatMap { baseline($0.providers) }
