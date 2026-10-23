@@ -1,4 +1,4 @@
-/// 앱 "오늘"·"비교" 화면의 데이터 계약 (서버 `today` 함수 응답).
+/// 앱 "날씨"·"기온" 탭과 비 상세의 데이터 계약 (서버 `today` 함수 응답).
 ///
 /// 서버(`server/supabase/functions/_shared/today.ts`)가 같은 키로 만든다. 날짜는 epoch 초(Int).
 /// 계약 샘플: Tests/WeatherCoreTests/Fixtures/today_response.json (서버 테스트가 생성 결과와 비교한다)
@@ -49,6 +49,9 @@ public struct TodayPlace: Codable, Hashable, Sendable, Identifiable {
     public var recentTemps: [TemperatureHistory]?
     /// 7일 보기: 오늘부터 날짜별 비 소식과 하루 기온(쓸 예보가 없는 날은 빠짐). 이전 서버의 응답이면 nil
     public var days: [TodayDay]?
+    /// 기온 탭 3일 보기: 어제·오늘·내일(응답 시간대)의 하루 날씨. 여행 날짜와 같은 계산이고, 어제는 비 소식(`rain`)이 없다.
+    /// 이전 서버의 응답이면 nil
+    public var around: [TripDayWeather]?
 }
 
 /// 하루 비 소식과 기온. 비 소식은 시간대 없이 그 날 비가 오는지만 본다.

@@ -212,6 +212,124 @@ import Testing
         #expect(night.brackets.isEmpty)
     }
 
+    @Test func timelineCarriesTemperatureLineAndLabels() throws {
+        let today = try fixture()
+        let home = today.places[0]
+        let model = RainTimelineModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(model.bars.map(\.temp) == [15, 16, 17, 17])
+        #expect(model.bars.map(\.timeText) == ["6시", "7시", "8시", "9시"])
+        #expect(model.tempScale == 14...18)
+        // 최저(6시)와 최고(처음 17°인 8시). 9시 눈금은 최고와 붙어 있어 뺀다
+        #expect(model.tempLabels == [
+            .init(index: 0, temp: 15, kind: .low),
+            .init(index: 2, temp: 17, kind: .high),
+        ])
+        #expect(model.tempLabels.map(\.text) == ["15°", "17°"])
+        #expect(model.tempLabels.first?.position == 0.5)
+        #expect(model.tempSegments.count == 1)
+        #expect(model.tempSegments.first?.map(\.index) == [0, 1, 2, 3])
+        #expect(model.tempFraction(16) == 0.5)
+        #expect(model.callout(at: 2) == "8시 51% · 17°")
+        #expect(model.accessibilityText(at: 2) == "8시, 강수확률 51%, 기온 17도")
+        #expect(model.barIndex(at: -1) == 0)
+        #expect(model.barIndex(at: 2.7) == 2)
+        #expect(model.barIndex(at: 9) == 3)
+    }
+
+    @Test func timelineWithoutOrWithFlatTemperatures() throws {
+        let today = try fixture()
+        var home = today.places[0]
+        for index in home.hours.indices { home.hours[index].temp = nil }
+        let none = RainTimelineModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(none.tempScale == nil)
+        #expect(none.tempLabels.isEmpty && none.tempSegments.isEmpty)
+        #expect(none.callout(at: 2) == "8시 51%")
+
+        // 온종일 15°: 범위는 4°로 넓히고, 최고·최저 없이 3시간 눈금만
+        for index in home.hours.indices { home.hours[index].temp = 15 }
+        let flat = RainTimelineModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(flat.tempScale == 13...17)
+        #expect(flat.tempLabels == [.init(index: 0, temp: 15, kind: .tick), .init(index: 3, temp: 15, kind: .tick)])
+
+        // 빈 시간에서 선이 끊긴다
+        home.hours[1].temp = nil
+        let gap = RainTimelineModel(place: home, tz: today.tz, now: today.generatedAt)
+        #expect(gap.tempSegments.map { $0.map(\.index) } == [[0], [2, 3]])
+
+        // 22시부터면 내일 시각에 날짜가 붙는다
+        let start = home.hours[0].t + 16 * 3600
+        for index in home.hours.indices { home.hours[index].t = start + index * 3600 }
+        let night = RainTimelineModel(place: home, tz: today.tz, now: start)
+        #expect(night.bars.map(\.timeText) == ["22시", "23시", "내일 0시", "내일 1시"])
+    }
+
+    /// 점 사이 곡선의 조절점(1/3 지점)이 두 값 밖으로 나가지 않는다
+    @Test(arguments: [
+        [15.0, 16, 17, 17, 17, 12],
+        [10.0, 20, 10, 20],
+        [3.0, 3.2, 9, 9.1, 30, 30.5],
+        [5.0, 5],
+        [7.0],
+    ])
+    func monotoneCurveDoesNotOvershoot(values: [Double]) {
+        let slopes = MonotoneCurve.tangents(values)
+        #expect(slopes.count == values.count)
+        for index in values.indices.dropLast() {
+            let low = min(values[index], values[index + 1]) - 1e-9
+            let high = max(values[index], values[index + 1]) + 1e-9
+            let first = values[index] + slopes[index] / 3
+            let second = values[index + 1] - slopes[index + 1] / 3
+            #expect(low <= first && first <= high)
+            #expect(low <= second && second <= high)
+        }
+    }
+
+    @Test func monotoneCurveFlattensPeaksAndPlateaus() {
+        let slopes = MonotoneCurve.tangents([10, 20, 10, 10, 15])
+        #expect(slopes[1] == 0)
+        #expect(slopes[2] == 0 && slopes[3] == 0)
+        #expect(MonotoneCurve.tangents([1, 2, 3]) == [1, 1, 1])
+    }
+
+    @Test func placeGlanceSummarizesTheNextRain() throws {
+        let today = try fixture()
+        let now = today.generatedAt
+        let glances = today.glances(now: now)
+        #expect(glances.map(\.name) == ["집", "회사"])
+        #expect(glances[0].rainText == "8–10시 비" && glances[0].isRainy)
+        #expect(glances[0].maxPop == 68 && glances[0].level == .high)
+        #expect(glances[0].temp == 15)
+        #expect(glances[1].rainText == "비 소식 없음" && !glances[1].isRainy)
+        #expect(glances[1].maxPop == 9 && glances[1].temp == 14)
+
+        var home = today.places[0]
+        let morning = home.windows[0]
+        #expect(PlaceGlance(place: home, tz: today.tz, now: morning.start + 600).rainText == "지금 비 · 10시까지")
+        // 자정을 넘는 비, 자정에 그치는 비
+        let night = morning.start + 15 * 3600 // 23시
+        home.windows = [RainWindow(start: night, end: night + 3 * 3600, maxPop: 60, agreeing: 3, total: 4)]
+        #expect(PlaceGlance(place: home, tz: today.tz, now: night + 600).rainText == "지금 비 · 내일 2시까지")
+        home.windows = [RainWindow(start: night - 3600, end: night + 3600, maxPop: 60, agreeing: 3, total: 4)]
+        #expect(PlaceGlance(place: home, tz: today.tz, now: night + 600).rainText == "지금 비 · 24시까지")
+    }
+
+    @Test func placeGlanceInTheWeekView() throws {
+        let today = try fixture()
+        let glances = today.glances(now: today.generatedAt, week: true)
+        #expect(glances[0].rainText == "오늘·목 비" && glances[0].isRainy)
+        #expect(glances[0].maxPop == 68)
+        // 회사는 날짜별 값이 없다
+        #expect(glances[1].rainText == "7일 예보를 받는 중" && glances[1].maxPop == 0)
+
+        var home = today.places[0]
+        home.days = home.days?.map { day in
+            var dry = day
+            dry.rainy = false
+            return dry
+        }
+        #expect(PlaceGlance(place: home, tz: today.tz, now: today.generatedAt, week: true).rainText == "7일 비 소식 없음")
+    }
+
     @Test func upcomingStartsAtTheCurrentHour() throws {
         let today = try fixture()
         let home = today.places[0]

@@ -64,14 +64,22 @@ import Testing
         #expect(week.days[4].outlook.headline == "최근 3일보다 조금 선선해요")
     }
 
-    @Test func todayMatchesTheTodayView() throws {
-        let place = try samplePlace()
-        let today = try #require(TemperatureComparisonModel(place: place, tz: tz, now: now))
+    @Test func todayRowUsesTheDaysTemperaturesLikeTheThreeDayCard() throws {
+        var place = try samplePlace()
         let week = try #require(WeekTemperatureModel(place: place, tz: tz, now: now))
         let first = try #require(week.days.first)
-        #expect(first.high == today.high?.today && first.low == today.low?.today)
-        #expect(first.baseline == today.daily)
-        #expect(first.outlook.high == today.high?.delta && first.outlook.low == today.low?.delta)
+        // 오늘 0–24시 모델 평균: 10° + 시×0.25°
+        #expect(first.high == 15.75 && first.low == 10)
+        // 기준은 서버의 모델 평균 기록(tempHistory)과 같은 묶음이라 그 기록으로 만든다
+        #expect(first.baseline == HomeBaseline(history: try #require(place.tempHistory), tz: tz, now: now))
+
+        // 3일 보기의 오늘 카드도 같은 하루 기온(around)이면 같은 값이다
+        let today = try #require(place.days?.first)
+        place.around = [-1, 0, 1].map { offset in
+            TripDayWeather(start: todayStart + offset * 86400, rain: nil, cloud: nil, snowCm: nil, temps: offset == 0 ? today.temps : nil)
+        }
+        let card = try #require(ThreeDayTemperatureModel(place: place, tz: tz, now: now)).days[1]
+        #expect(card.high == first.high && card.low == first.low)
     }
 
     @Test func daysWithFewerModelsUseTheSameModelsForTheBaseline() throws {
@@ -114,10 +122,6 @@ import Testing
                 temps: TemperatureHistory(providers: models, start: todayStart + day * 86400, temps: temps)
             )
         }
-        // 오늘 보기의 오늘 값도 같게
-        var history = try #require(place.tempHistory)
-        history.temps = Array(history.temps.prefix(72)) + (0..<24).map { Double?(14 + Double($0) * 0.25) }
-        place.tempHistory = history
         let week = try #require(WeekTemperatureModel(place: place, tz: tz, now: now))
         #expect(week.headline == "최근 3일과 비슷해요")
         #expect(week.outlook?.trend == .similar)
@@ -149,7 +153,7 @@ import Testing
             day.temps = nil
             return day
         }
-        // 오늘 값은 오늘 보기로 채울 수 있지만, 날짜별 기온이 없는 이전 서버 응답이면 7일 보기를 만들지 않는다
+        // 날짜별 기온이 없는 이전 서버 응답이면 7일 보기를 만들지 않는다
         #expect(WeekTemperatureModel(place: place, tz: tz, now: now) == nil)
         place.days = nil
         #expect(WeekTemperatureModel(place: place, tz: tz, now: now) == nil)

@@ -1,7 +1,7 @@
 # WeatherBridge
 
 집·회사 특화 **시간대별 강수확률** iOS 앱. 여러 무료 날씨 소스를 비교·종합하고, 출근 1시간 전부터 잠금화면(Live Activity)에 오늘 비 소식을 보여줍니다.
-여행지와 기간을 등록하면 그 기간 여행지와 집의 날씨를 보여주고, 기온은 지금(집의 최근 3일)과 비교합니다.
+기온은 어제·오늘·내일을 나란히 견주고(7일 보기는 최근 3일과), 여행지와 기간을 등록하면 그 기간 여행지와 집의 날씨를 지금(집의 최근 3일)과 비교해 보여줍니다.
 
 - 구현 계획: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 결정 기록: [docs/decisions.md](docs/decisions.md)

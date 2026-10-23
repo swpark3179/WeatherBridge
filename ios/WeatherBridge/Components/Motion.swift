@@ -13,6 +13,15 @@ enum Motion {
     static let reveal = Animation.easeOut(duration: 1.1)
     /// 동작 줄이기에서 화면이 바뀔 때 (흐려지기만)
     static let fade = Animation.easeInOut(duration: 0.2)
+    /// 밀어서 시간을 고를 때 세로선·말풍선이 따라간다
+    static let scrub = Animation.snappy(duration: 0.2)
+    /// 숫자가 전날(지금) 값에서 그 날 값으로 굴러간다
+    static let roll = Animation.snappy(duration: 0.9)
+
+    /// 두 칸 전환: 왼쪽 칸 내용은 왼쪽에서, 오른쪽 칸 내용은 오른쪽에서 들어오고 그쪽으로 나간다
+    static func slide(_ edge: HorizontalEdge) -> AnyTransition {
+        .opacity.combined(with: .offset(x: edge == .leading ? -24 : 24))
+    }
 }
 
 extension View {

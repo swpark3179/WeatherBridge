@@ -25,6 +25,7 @@ import Testing
         #expect(weather.rain?.level == .high)
         #expect(weather.cloud == 95)
         #expect(weather.snowCm == 2.4)
+        #expect(weather.precipMm == 24)
         #expect(weather.temps?.providers == ["om_ecmwf", "om_gfs"])
         #expect(weather.temps?.temps.count == 24)
 
@@ -112,7 +113,7 @@ import Testing
     }
 
     @Test func outlookNamesItsBaseline() {
-        let label = TemperatureComparisonModel.label
+        let label = WeekTemperatureModel.label
         #expect(TemperatureOutlook(high: TemperatureDelta(today: 16.1, baseline: 20.1), low: TemperatureDelta(today: 7.1, baseline: 10.1), label: label).headline == "최근 3일보다 조금 추워요")
         #expect(TemperatureOutlook(high: TemperatureDelta(today: 20.4, baseline: 20), low: nil, label: label).headline == "최근 3일과 비슷해요")
         #expect(TemperatureOutlook(high: TemperatureDelta(today: 24, baseline: 20), low: TemperatureDelta(today: 7, baseline: 10), label: label).headline == "최근 3일보다 일교차가 커요")
@@ -136,6 +137,19 @@ import Testing
     ] as [(TripRain?, Double?, Int?, TripSky)])
     func skyFromRainSnowAndCloud(rain: TripRain?, snowCm: Double?, cloud: Int?, sky: TripSky) {
         let weather = TripDayWeather(start: 0, rain: rain, cloud: cloud, snowCm: snowCm, temps: nil)
+        #expect(TripSky(weather) == sky)
+    }
+
+    /// 지난 날은 비 소식이 없어 하루 강수량으로 비·눈을 정한다. 비 소식이 있으면 그것을 따른다
+    @Test(arguments: [
+        (nil, 3.2, nil, 90, TripSky.rain),
+        (nil, 3.2, 1.0, 90, .snow),
+        (nil, 0.4, nil, 20, .clear),
+        (nil, nil, nil, 90, .cloudy),
+        (TripRain(pop: 10, agreeing: 0, total: 3, rainy: false), 5.0, nil, 20, .clear),
+    ] as [(TripRain?, Double?, Double?, Int?, TripSky)])
+    func pastDaySkyFromPrecipitation(rain: TripRain?, precipMm: Double?, snowCm: Double?, cloud: Int?, sky: TripSky) {
+        let weather = TripDayWeather(start: 0, rain: rain, cloud: cloud, snowCm: snowCm, temps: nil, precipMm: precipMm)
         #expect(TripSky(weather) == sky)
     }
 

@@ -55,6 +55,8 @@ public struct TripDayWeather: Codable, Hashable, Sendable {
     public var snowCm: Double?
     /// 0–24시 시간별 기온. 그 날 끝까지 닿는 Open-Meteo 모델의 평균(`providers`)
     public var temps: TemperatureHistory?
+    /// 하루 강수량(mm), 모델 평균. 비 소식이 없는 지난 날의 하늘에 쓴다. 이전 서버의 응답이면 nil
+    public var precipMm: Double?
 }
 
 /// 하루 비 소식 (오늘 탭 7일 보기와 같은 계산)

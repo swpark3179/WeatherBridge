@@ -61,8 +61,10 @@ struct TripDetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                 } else {
-                    DayPager(model: trip, selected: $selected)
-                        .padding(.horizontal, -16)
+                    DayPager(items: trip.days, selected: $selected) { day, isActive in
+                        TripDayCard(day: day, homeName: trip.homeName, isActive: isActive)
+                    }
+                    .padding(.horizontal, -16)
                     if let chart = TripChartModel(model: trip) {
                         TripTemperatureChart(chart: chart, model: trip, selected: $selected)
                     }
@@ -162,75 +164,15 @@ private struct TripHeader: View {
 
 // MARK: 날짜 카드 (가로로 넘김)
 
-private struct DayPager: View {
-    let model: TripModel
-    @Binding var selected: LocalDate?
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        // 동작 줄이기면 옆 카드가 줄어들지 않고 흐려지기만 한다
-        let shrinks = !reduceMotion
-        VStack(spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(model.days) { day in
-                        TripDayCard(day: day, homeName: model.homeName, isActive: selected == day.date)
-                            .containerRelativeFrame(.horizontal)
-                            .scrollTransition(axis: .horizontal) { content, phase in
-                                content
-                                    .scaleEffect(phase.isIdentity || !shrinks ? 1 : 0.92)
-                                    .opacity(phase.isIdentity ? 1 : 0.6)
-                            }
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $selected)
-            .safeAreaPadding(.horizontal, 28)
-            .sensoryFeedback(.selection, trigger: selected)
-
-            if model.days.count > 1 {
-                PageDots(days: model.days, selected: $selected)
-            }
-        }
-    }
-}
-
-private struct PageDots: View {
-    let days: [TripModel.Day]
-    @Binding var selected: LocalDate?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(days) { day in
-                Capsule()
-                    .fill(day.date == selected ? Color.primary : Color.secondary.opacity(0.35))
-                    .frame(width: day.date == selected ? 18 : 6, height: 6)
-            }
-        }
-        .animation(reduceMotion ? nil : .spring(duration: 0.35), value: selected)
-        .accessibilityHidden(true)
-    }
-}
-
 /// 하루 카드: 뒤에 날씨 장면, 위에 날짜와 하늘, 아래에 최고·최저(지금 값에서 굴러감)와 비교, 같은 날 집.
 private struct TripDayCard: View {
     let day: TripModel.Day
     let homeName: String?
     let isActive: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// 처음 보일 때 숫자를 지금 값에서 그 날 값으로 굴린다
-    @State private var revealed = false
-    /// 이 카드가 보이게 될 때마다 하늘 아이콘을 한 번 튕긴다
-    @State private var bounce = 0
-
     var body: some View {
         let dest = day.destination
-        VStack(alignment: .leading, spacing: 0) {
+        SceneCard(sky: dest.sky, isActive: isActive) { bounce in
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(day.relative.map { "\($0) · \(day.label)" } ?? day.label)
@@ -247,12 +189,7 @@ private struct TripDayCard: View {
                         .symbolEffect(.bounce, value: bounce)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-
-            Spacer(minLength: 56)
-
+        } panel: { revealed in
             VStack(alignment: .leading, spacing: 10) {
                 if dest.hasForecast {
                     HStack(alignment: .bottom, spacing: 16) {
@@ -291,66 +228,7 @@ private struct TripDayCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
-        .padding(10)
-        .frame(height: 380)
-        .background {
-            WeatherSceneView(sky: dest.sky, isActive: isActive)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .accessibilityElement(children: .combine)
-        .onChange(of: isActive, initial: true) { _, active in
-            guard active else { return }
-            if !reduceMotion { bounce += 1 }
-            guard !revealed else { return }
-            withMotion(.snappy(duration: 0.9).delay(0.15), reduceMotion: reduceMotion) { revealed = true }
-        }
-    }
-}
-
-/// 큰 기온 숫자. 처음에는 지금 값을 보이고 그 날 값으로 굴러간다.
-private struct TempValue: View {
-    let title: String
-    let value: Double?
-    let from: Double?
-    let revealed: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            if let value {
-                let shown = Int((revealed ? value : (from ?? value)).rounded())
-                Text("\(shown)°")
-                    .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
-                    .contentTransition(.numericText(value: Double(shown)))
-            } else {
-                Text("–")
-                    .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title) \(degreesText(value))")
-    }
-}
-
-private struct RainValue: View {
-    let rain: TripRain
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Image(systemName: rain.rainy ? "umbrella.fill" : "drop")
-                .font(.title3)
-            Text("\(rain.pop)%")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-        }
-        .foregroundStyle(rain.rainy ? Color.blue : Color.secondary)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("강수확률 \(rain.pop)%\(rain.rainy ? ", 비 예상" : "")")
     }
 }
 
@@ -499,25 +377,6 @@ private struct TripTemperatureChart: View {
         }
         .padding()
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-private struct LegendLine: View {
-    let color: Color
-    let dashed: Bool
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Path { path in
-                path.move(to: CGPoint(x: 0, y: 5))
-                path.addLine(to: CGPoint(x: 16, y: 5))
-            }
-            .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: dashed ? [3, 2] : []))
-            .frame(width: 16, height: 10)
-            Text(text)
-                .lineLimit(1)
-        }
     }
 }
 

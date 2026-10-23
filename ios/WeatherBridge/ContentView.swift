@@ -1,10 +1,14 @@
 import Combine
 import SwiftUI
+import WeatherCore
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var bridge: LiveActivityBridge
     @Environment(\.scenePhase) private var scenePhase
+    /// 날씨·기온 탭에서 고른 장소와 기온 보기. AppModel 값을 장면 상태로 비춰 둔다 (UserDefaults는 쓰지 않는다)
+    @SceneStorage("focusedPlace") private var storedPlace: PlaceKind = .home
+    @SceneStorage("temperatureMode") private var storedTemperatureMode: TemperatureMode = .threeDay
 
     var body: some View {
         content
@@ -20,6 +24,12 @@ struct ContentView: View {
                     Task { await model.didBecomeActive() }
                 }
             }
+            .onAppear {
+                model.focusedPlace = storedPlace
+                model.temperatureMode = storedTemperatureMode
+            }
+            .onChange(of: model.focusedPlace) { _, place in storedPlace = place }
+            .onChange(of: model.temperatureMode) { _, mode in storedTemperatureMode = mode }
             .alert("알림", isPresented: noticeBinding) {
                 Button("확인", role: .cancel) {}
             } message: {
@@ -55,11 +65,11 @@ struct ContentView: View {
             OnboardingView()
         case .ready:
             TabView(selection: $model.selectedTab) {
-                Tab("오늘", systemImage: "cloud.sun", value: AppTab.today) {
+                Tab("날씨", systemImage: "cloud.sun", value: AppTab.weather) {
                     TodayView()
                 }
-                Tab("비교", systemImage: "chart.xyaxis.line", value: AppTab.compare) {
-                    CompareView()
+                Tab("기온", systemImage: "thermometer.medium", value: AppTab.temperature) {
+                    TemperatureTab()
                 }
                 Tab("여행", systemImage: "airplane", value: AppTab.trips) {
                     TripListView()

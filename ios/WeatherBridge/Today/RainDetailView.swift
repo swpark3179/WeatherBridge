@@ -1,19 +1,47 @@
-import Charts
 import SwiftUI
 import WeatherCore
 
-/// 비 상세: 장소 카드를 누르면 열린다. 몇 시부터 몇 시까지 비가 오는지, 24시간 그래프, 시간별 목록, 예보별 값.
+/// 비 상세 화면의 섹션 (예보별로 바로 열 때 그 자리로 스크롤한다)
+enum RainDetailSection: Hashable {
+    case summary, sources
+}
+
+/// 비 상세로 가는 경로
+struct RainDetailRoute: Hashable {
+    let placeID: String
+    /// 처음 보여줄 비 구간 (`upcomingWindows` 순번)
+    let window: Int
+    /// 처음 보여줄 섹션. `.sources`면 예보별 선을 켜고 예보 카드에서 연다
+    var section: RainDetailSection = .summary
+}
+
+/// 예보 카드 보기: 그래프 또는 표
+private enum ForecastStyle: Hashable {
+    case chart, table
+}
+
+/// 비 상세: 장소 카드를 누르면 열린다. 몇 시부터 몇 시까지 비가 오는지, 예보 그래프(종합, 켜면 예보별 선 · 24/48시간 · 표),
+/// 고른 시간의 예보별 값, 의견이 갈리는 시간, 시간별 목록.
 struct RainDetailView: View {
     let route: RainDetailRoute
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var windowIndex: Int
     /// 고른 시간 (`TodayHour.t`). nil이면 고른 비 구간의 가장 높은 시간
     @State private var selectedHour: Int?
+    /// 예보 카드 기간 (시간)
+    @State private var range = 24
+    @State private var style = ForecastStyle.chart
+    /// 예보마다 선을 그린다
+    @State private var showsSources: Bool
+    /// 그리지 않을 예보
+    @State private var hidden: Set<String> = []
 
     init(route: RainDetailRoute) {
         self.route = route
         _windowIndex = State(initialValue: route.window)
+        _showsSources = State(initialValue: route.section == .sources)
     }
 
     private var place: TodayPlace? {
@@ -28,7 +56,7 @@ struct RainDetailView: View {
                 ContentUnavailableView(
                     "예보가 없습니다",
                     systemImage: "cloud",
-                    description: Text("오늘 화면에서 당겨서 새로고침해 주세요.")
+                    description: Text("날씨 탭에서 당겨서 새로고침해 주세요.")
                 )
             }
         }
@@ -36,6 +64,7 @@ struct RainDetailView: View {
         .navigationTitle(place.map { "\($0.name) 비 상세" } ?? "비 상세")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: windowIndex) { selectedHour = nil }
+        .sensoryFeedback(.selection, trigger: style)
     }
 
     private func content(today: TodayResponse, place: TodayPlace, now: Int) -> some View {
@@ -43,57 +72,152 @@ struct RainDetailView: View {
         let windows = place.upcomingWindows(now: now)
         let hours = place.upcoming(hours: 24, now: now)
         let window = windows.isEmpty ? nil : windows[min(windowIndex, windows.count - 1)]
-        let focus = selectedHour ?? window.flatMap { place.peakHour(of: $0)?.t } ?? hours.first?.t
-        let focusHour = hours.first { $0.t == focus }
-        return ScrollView {
-            VStack(spacing: 16) {
-                if windows.count > 1 {
-                    Picker("비 구간", selection: $windowIndex) {
-                        ForEach(Array(windows.enumerated()), id: \.offset) { index, w in
-                            Text(clock.windowText(start: w.start, end: w.end, now: now)).tag(index)
+        let chart = CompareChartModel(place: place, tz: today.tz, now: now, hours: range)
+        // 예보별로 열었으면 처음엔 의견이 갈리는 첫 시간을 고른다
+        let opening = route.section == .sources ? chart.splits.first?.start : nil
+        let focusTime = selectedHour ?? opening ?? window.flatMap { place.peakHour(of: $0)?.t } ?? hours.first?.t
+        let focus = chart.hours.first { $0.t == focusTime }
+        let when = focus.map { "\(clock.dayLabel($0.t, from: now)) \(clock.hour($0.t))시" } ?? ""
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 16) {
+                    if windows.count > 1 {
+                        Picker("비 구간", selection: $windowIndex) {
+                            ForEach(Array(windows.enumerated()), id: \.offset) { index, w in
+                                Text(clock.windowText(start: w.start, end: w.end, now: now)).tag(index)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    RainHero(
+                        place: place,
+                        window: window,
+                        hours: hours,
+                        clock: clock,
+                        now: now,
+                        tz: today.tz,
+                        commuteTimes: model.commuteTimes(tz: today.tz, now: now)
+                    )
+                    forecastCard(place: place, tz: today.tz, chart: chart, threshold: today.threshold, window: window, focus: focus, now: now)
+                        .id(RainDetailSection.sources)
+                    SourceValues(providers: chart.providers, focus: focus, when: when, showsSources: $showsSources, hidden: $hidden)
+                    DisagreementList(disagreements: chart.disagreements) { item in
+                        selectedHour = item.span.start
+                        showsSources = true
+                        hidden.remove(item.provider)
+                        style = .chart
+                        withMotion(Motion.gentle, reduceMotion: reduceMotion) {
+                            proxy.scrollTo(RainDetailSection.sources, anchor: .top)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    if !hours.isEmpty {
+                        HourList(
+                            hours: hours,
+                            windows: windows,
+                            selectedWindow: window,
+                            threshold: today.threshold,
+                            clock: clock,
+                            focus: focusTime
+                        ) { selectedHour = $0 }
+                    }
+                    if !place.errors.isEmpty {
+                        Label("받지 못한 예보: \(place.errors.joined(separator: ", "))", systemImage: "exclamationmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                RainHero(
-                    place: place,
-                    window: window,
-                    hours: hours,
-                    clock: clock,
-                    now: now,
-                    tz: today.tz,
-                    commuteTimes: model.commuteTimes(tz: today.tz, now: now)
-                )
-                if !hours.isEmpty {
-                    DetailChart(
-                        hours: hours,
-                        windows: windows,
-                        selectedWindow: window,
-                        threshold: today.threshold,
-                        clock: clock,
-                        focusHour: focusHour,
-                        selectedHour: $selectedHour
-                    )
-                    HourList(
-                        hours: hours,
-                        windows: windows,
-                        selectedWindow: window,
-                        threshold: today.threshold,
-                        clock: clock,
-                        focus: focus
-                    ) { selectedHour = $0 }
+                .padding()
+                // 비 구간·기간·보기를 바꾸면 숫자·그래프 강조·목록이 새 값으로 옮겨 간다
+                .motion(value: windowIndex)
+                .motion(Motion.gentle, value: range)
+                .motion(value: showsSources)
+                .motion(value: hidden)
+                .motion(reduced: Motion.fade, value: style)
+                .motion(Motion.gentle, value: model.today?.generatedAt)
+            }
+            .onAppear {
+                if route.section == .sources {
+                    proxy.scrollTo(RainDetailSection.sources, anchor: .top)
                 }
-                if let focusHour {
-                    SourceBreakdown(place: place, hour: focusHour, clock: clock) {
-                        model.openCompare(place.kind)
+            }
+        }
+    }
+
+    /// 예보 카드: 기간, 고른 시각 값, [그래프 | 표]
+    private func forecastCard(
+        place: TodayPlace,
+        tz: String,
+        chart: CompareChartModel,
+        threshold: Int,
+        window: RainWindow?,
+        focus: TodayHour?,
+        now: Int
+    ) -> some View {
+        let clock = LocalClock(tz: tz)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                Text("앞으로 \(range)시간")
+                    .font(.headline)
+                    .contentTransition(.numericText())
+                Spacer()
+                Picker("기간", selection: $range) {
+                    Text("24시간").tag(24)
+                    Text("48시간").tag(48)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
+            if let focus {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(clock.dayLabel(focus.t, from: now)) \(clock.hour(focus.t))시 종합 \(focus.consensus ?? 0)%")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .contentTransition(.numericText(value: Double(focus.consensus ?? 0)))
+                    if let temp = focus.temp {
+                        Text("· \(Int(temp.rounded()))°")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding()
-            // 비 구간을 바꾸면 숫자·그래프 강조·목록이 새 구간으로 옮겨 간다
-            .motion(value: windowIndex)
-            .motion(Motion.gentle, value: model.today?.generatedAt)
+            Picker("보기", selection: $style) {
+                Text("그래프").tag(ForecastStyle.chart)
+                Text("표").tag(ForecastStyle.table)
+            }
+            .pickerStyle(.segmented)
+            // 그래프는 왼쪽에서, 표는 오른쪽에서 들어온다
+            ZStack(alignment: .top) {
+                switch style {
+                case .chart:
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForecastChart(
+                            model: chart,
+                            threshold: threshold,
+                            selectedWindowStart: window?.start,
+                            showsSources: showsSources,
+                            hidden: hidden,
+                            focus: focus,
+                            selectedHour: $selectedHour
+                        )
+                        .frame(height: 200)
+                        Text(showsSources
+                            ? "굵은 선은 종합, 색 선은 예보별, 옅은 띠는 예보들의 범위예요. 그래프를 밀어 시간을 고르세요."
+                            : "선은 종합, 옅은 띠는 예보들의 최저–최고 범위예요. 그래프를 밀어 시간을 고르세요.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .motionTransition(Motion.slide(.leading))
+                case .table:
+                    VStack(alignment: .leading, spacing: 8) {
+                        HeatmapView(model: HeatmapModel(place: place, tz: tz, now: now, hours: range))
+                        HeatmapLegend()
+                    }
+                    .motionTransition(Motion.slide(.trailing))
+                }
+            }
         }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -179,150 +303,6 @@ private struct StatTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(highlighted ? Color.blue.opacity(0.12) : Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-// MARK: 24시간 그래프
-
-/// 종합 강수확률 선 + 예보들의 최저–최고 띠 + 비 구간 음영. 밀어서 시간을 고르면 1시간 단위로 붙는다.
-private struct DetailChart: View {
-    let hours: [TodayHour]
-    let windows: [RainWindow]
-    let selectedWindow: RainWindow?
-    let threshold: Int
-    let clock: LocalClock
-    let focusHour: TodayHour?
-    @Binding var selectedHour: Int?
-
-    @State private var rawSelection: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("앞으로 24시간")
-                    .font(.headline)
-                Spacer()
-                if let focusHour {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(clock.hour(focusHour.t))시 \(focusHour.consensus ?? 0)%")
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                        if let temp = focusHour.temp {
-                            Text("· \(Int(temp.rounded()))°")
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            chart
-                .frame(height: 180)
-            Text("진한 선은 종합, 옅은 띠는 예보들의 최저–최고 범위예요. 그래프를 밀어 시간을 고르세요.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    private var chart: some View {
-        Chart {
-            ForEach(Array(windows.enumerated()), id: \.offset) { _, window in
-                RectangleMark(
-                    xStart: .value("시작", date(window.start)),
-                    xEnd: .value("끝", date(window.end)),
-                    yStart: .value("아래", 0),
-                    yEnd: .value("위", 100)
-                )
-                .foregroundStyle(Color.blue.opacity(window == selectedWindow ? 0.16 : 0.07))
-            }
-            RuleMark(y: .value("기준", threshold))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                .foregroundStyle(Color.secondary)
-            ForEach(hours, id: \.t) { hour in
-                if let low = hour.min, let high = hour.max {
-                    AreaMark(
-                        x: .value("시각", middle(hour)),
-                        yStart: .value("최저", low),
-                        yEnd: .value("최고", high)
-                    )
-                    .foregroundStyle(Color.gray.opacity(0.22))
-                    .interpolationMethod(.monotone)
-                }
-            }
-            ForEach(hours, id: \.t) { hour in
-                if let pop = hour.consensus {
-                    LineMark(
-                        x: .value("시각", middle(hour)),
-                        y: .value("강수확률", pop)
-                    )
-                    .foregroundStyle(Color.blue)
-                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
-                }
-            }
-            if let focusHour, let pop = focusHour.consensus {
-                RuleMark(x: .value("고른 시각", middle(focusHour)))
-                    .foregroundStyle(Color.primary.opacity(0.5))
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                PointMark(
-                    x: .value("고른 시각", middle(focusHour)),
-                    y: .value("강수확률", pop)
-                )
-                .foregroundStyle(Color.blue)
-                .symbolSize(90)
-            }
-        }
-        .revealsPlotOnAppear()
-        .chartYScale(domain: 0...100)
-        .chartXScale(domain: xDomain)
-        .chartYAxis {
-            AxisMarks(position: .leading, values: [0, 50, 100]) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let pop = value.as(Int.self) {
-                        Text("\(pop)%")
-                    }
-                }
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: tickDates) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let date = value.as(Date.self) {
-                        Text("\(clock.hour(Int(date.timeIntervalSince1970)))시")
-                    }
-                }
-            }
-        }
-        .chartXSelection(value: $rawSelection)
-        .onChange(of: rawSelection) { _, date in
-            guard let date else { return }
-            let t = Int(date.timeIntervalSince1970)
-            let hourStart = t - t % 3600
-            if hourStart != selectedHour, hours.contains(where: { $0.t == hourStart }) {
-                selectedHour = hourStart
-            }
-        }
-        .sensoryFeedback(.selection, trigger: selectedHour)
-        .accessibilityLabel("앞으로 24시간 종합 강수확률 그래프")
-    }
-
-    private var xDomain: ClosedRange<Date> {
-        date(hours.first?.t ?? 0)...date((hours.last?.t ?? 0) + 3600)
-    }
-
-    private var tickDates: [Date] {
-        hours.filter { clock.hour($0.t) % 3 == 0 }.map { date($0.t) }
-    }
-
-    private func date(_ epoch: Int) -> Date {
-        Date(timeIntervalSince1970: TimeInterval(epoch))
-    }
-
-    /// 막대·음영과 맞추려고 점은 그 시간의 가운데에 찍는다
-    private func middle(_ hour: TodayHour) -> Date {
-        date(hour.t + 1800)
     }
 }
 
@@ -449,76 +429,3 @@ private struct AgreementDots: View {
     }
 }
 
-// MARK: 예보별 값
-
-private struct SourceBreakdown: View {
-    let place: TodayPlace
-    let hour: TodayHour
-    let clock: LocalClock
-    let openCompare: () -> Void
-
-    var body: some View {
-        let providers = ForecastSourceInfo.sorted(place.sources.map(\.provider) + Array(hour.providers.keys))
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("\(clock.hour(hour.t))시 예보별")
-                    .font(.headline)
-                SourceRow(label: "종합", value: hour.consensus, color: .primary, bold: true)
-                ForEach(providers, id: \.self) { provider in
-                    SourceRow(
-                        label: ForecastSourceInfo.label(provider),
-                        value: hour.providers[provider],
-                        color: ForecastSourceInfo.color(provider),
-                        bold: false
-                    )
-                }
-            }
-            .padding()
-            Divider()
-            Button(action: openCompare) {
-                HStack {
-                    Text("비교 탭에서 자세히 보기")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                }
-                .padding(.horizontal)
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
-            }
-        }
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-private struct SourceRow: View {
-    let label: String
-    let value: Int?
-    let color: Color
-    let bold: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .font(.subheadline.weight(bold ? .bold : .regular))
-                .frame(width: 96, alignment: .leading)
-            Capsule()
-                .fill(Color(.tertiarySystemFill))
-                .frame(height: 10)
-                .overlay(alignment: .leading) {
-                    GeometryReader { geo in
-                        Capsule()
-                            .fill(color)
-                            .frame(width: max(4, geo.size.width * CGFloat(value ?? 0) / 100))
-                    }
-                }
-            Text(value.map { "\($0)%" } ?? "–")
-                .font(.subheadline.weight(bold ? .bold : .regular).monospacedDigit())
-                .frame(width: 44, alignment: .trailing)
-        }
-        .frame(minHeight: 28)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label) \(value.map { "\($0)%" } ?? "값 없음")")
-    }
-}

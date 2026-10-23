@@ -340,6 +340,7 @@
             },
             "cloud": 50,
             "snowCm": 0,
+            "precipMm": 0,
             "temps": {
               "providers": [
                 "om_ecmwf",
@@ -385,6 +386,7 @@
             },
             "cloud": 50,
             "snowCm": 0,
+            "precipMm": 0,
             "temps": {
               "providers": [
                 "om_ecmwf",
@@ -443,6 +445,7 @@
             },
             "cloud": 20,
             "snowCm": 0,
+            "precipMm": 0,
             "temps": {
               "providers": [
                 "om_ecmwf",
@@ -488,6 +491,7 @@
             },
             "cloud": 40,
             "snowCm": 0,
+            "precipMm": 0,
             "temps": {
               "providers": [
                 "om_ecmwf",
@@ -536,6 +540,7 @@
             },
             "cloud": 95,
             "snowCm": 2.4,
+            "precipMm": 24,
             "temps": {
               "providers": [
                 "om_ecmwf",
@@ -580,6 +585,7 @@
             },
             "cloud": 80,
             "snowCm": 0,
+            "precipMm": 0,
             "temps": {
               "providers": [
                 "om_ecmwf",

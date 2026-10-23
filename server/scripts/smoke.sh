@@ -156,12 +156,15 @@ else
           sources: [.sources[].provider], errors,
           tempHistory: (.tempHistory | if . then {providers, hours: (.temps | length)} else null end),
           recentTemps: [(.recentTemps // [])[] | "\(.providers[0]) \(.temps | length)h"],
-          days: [(.days // [])[] | "\(.pop)%\(if .rainy then "☔" else "" end) \(.temps.providers // [] | length)모델"]}]}'
+          days: [(.days // [])[] | "\(.pop)%\(if .rainy then "☔" else "" end) \(.temps.providers // [] | length)모델"],
+          around: [(.around // [])[] | "\(.rain.pop // "-")% 운량 \(.cloud // "-") \(.precipMm // "-")mm \(.temps.providers // [] | length)모델"]}]}'
       [ "$(echo "$BODY" | jq '.places[0].sources | length')" -ge 3 ] || fail "today 소스가 3개 미만"
       echo "$BODY" | jq -e '.places[0].tempHistory.temps | length > 0' >/dev/null || fail "today에 기온 비교용 기록(tempHistory)이 없습니다"
       echo "$BODY" | jq -e '.places[0].days | length > 0' >/dev/null || fail "today에 7일 보기용 날짜별 비 소식(days)이 없습니다"
       echo "$BODY" | jq -e '.places[0].recentTemps | length > 0' >/dev/null || fail "today에 7일 기온 비교용 최근 기온(recentTemps)이 없습니다"
       echo "$BODY" | jq -e 'any(.places[0].days[]; .temps != null)' >/dev/null || fail "today의 날짜별 기온(days[].temps)이 모두 비어 있습니다"
+      echo "$BODY" | jq -e '.places[0].around | length == 3 and .[0].rain == null and .[1].temps != null' >/dev/null ||
+        fail "today에 기온 탭 3일 보기용 어제·오늘·내일(around)이 없거나 비어 있습니다"
       # 좌표 키가 없는지 본다 (값으로 찾으면 37.5° 같은 기온이 걸린다)
       echo "$BODY" | jq -e '[paths | .[-1] | strings | select(test("^(lat|lon)"))] | length == 0' >/dev/null || fail "today 응답에 좌표가 있습니다"
     fi

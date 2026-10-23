@@ -1,5 +1,5 @@
 /**
- * 앱 "오늘"·"비교" 화면과 요약 알림이 쓰는 사용자별 예보 묶음.
+ * 앱 "날씨"·"기온" 탭, 비 상세와 요약 알림이 쓰는 사용자별 예보 묶음.
  * 응답 형식은 ios/Packages/WeatherCore의 TodayResponse와 같고, 계약 샘플
  * ios/Packages/WeatherCore/Tests/WeatherCoreTests/Fixtures/today_response.json을 양쪽 테스트가 검증한다.
  * 좌표는 싣지 않는다.
@@ -7,21 +7,29 @@
 import { aggregate, aggregateDay, type RainWindow } from "./aggregate.ts";
 import { type Briefing, buildBriefing, restOfLocalDay } from "./briefing.ts";
 import type { Place, PlaceKind } from "./db.ts";
+import {
+  coveringDay,
+  DayWeatherBuilder,
+  meanTempSeries,
+  OPEN_METEO_PROVIDERS,
+  openMeteoReach,
+  type TempHistory,
+  type TripDayWeather,
+} from "./day_weather.ts";
 import { type Deps, ensureForecasts } from "./forecast_service.ts";
 import type { Family, ProviderForecast, ProviderId } from "./forecast_types.ts";
-import { OPEN_METEO_MODELS } from "./providers/open_meteo.ts";
-import { addDays, localDateOf, zonedEpoch } from "./schedule.ts";
+import { addDays, formatLocalDate, localDateOf, zonedEpoch } from "./schedule.ts";
 
 export const DEFAULT_THRESHOLD = 30;
 const HORIZON_HOURS = 48;
 /** 기온 비교에 싣는 지난 날 수 (어제 ~ 7일 전) */
 export const TEMP_HISTORY_DAYS = 7;
-/** 값이 가장 많은 소스의 이 비율보다 적게 가진 소스는 기온 평균에서 뺀다 */
-const TEMP_HISTORY_MIN_COVERAGE = 0.9;
 /** 7일 보기: 오늘부터 실을 현지 날짜 수 */
 export const DAILY_DAYS = 7;
 /** 7일 보기 기온 비교의 기준 날 수(어제·그제·3일 전). 앱 HomeBaseline.days와 같다 */
 export const RECENT_DAYS = 3;
+/** 기온 탭 3일 보기: 오늘에서 앞뒤 날 (어제·오늘·내일) */
+export const AROUND_DAYS = [-1, 0, 1] as const;
 
 export interface LoadedPlace {
   place: Place;
@@ -62,6 +70,11 @@ export interface TodayPlace {
   recentTemps: TempHistory[];
   /** 7일 보기: 오늘부터 날짜별 비 소식과 하루 기온. 쓸 비 예보가 없는 날은 빠진다 */
   days: TodayDay[];
+  /**
+   * 기온 탭 3일 보기: 어제·오늘·내일(응답 시간대)의 하루 날씨. 여행 날짜와 같은 계산(DayWeatherBuilder)이고
+   * 늘 3개다. 어제는 지난 날이라 rain이 null이고, 하늘은 운량·강수량(precipMm)으로 정한다.
+   */
+  around: TripDayWeather[];
 }
 
 /** 하루 비 소식 (aggregate.ts aggregateDay)과 하루 기온. 시간대 없이 그 날 비가 오는지만 본다. */
@@ -81,19 +94,6 @@ export interface TodayDay {
   temps: TempHistory | null;
 }
 
-/**
- * 지난 며칠과 오늘의 시간별 기온. 앱이 오늘 기온을 어제·최근 며칠의 같은 시각과 비교한다.
- * 모든 시간이 같은 소스 묶음의 평균이라, 소스마다 다른 치우침(격자·고도)이 날짜 간 차이에서 빠진다.
- */
-export interface TempHistory {
-  /** 평균에 쓴 소스 */
-  providers: ProviderId[];
-  /** 첫 값의 시각 (epoch 초, UTC 정시) */
-  start: number;
-  /** start부터 1시간 간격 기온(°C, 소수 첫째 자리). 값이 없는 시간은 null */
-  temps: Array<number | null>;
-}
-
 export interface TodayResponse {
   generatedAt: number;
   tz: string;
@@ -105,11 +105,6 @@ export interface TodayResponse {
 }
 
 const KIND_ORDER: Record<PlaceKind, number> = { home: 0, office: 1, trip: 2 };
-
-/** 지난 값도 주는 소스 (기온 비교·여행 기온은 이 모델들끼리만 평균한다) */
-export const OPEN_METEO_PROVIDERS: ReadonlySet<ProviderId> = new Set(
-  Object.values(OPEN_METEO_MODELS),
-);
 
 /** 장소별 예보를 캐시에서 꺼낸다(만료됐으면 새로 받음). 집, 회사 순서로 돌려준다. */
 export async function loadForecasts(deps: Deps, places: Place[]): Promise<LoadedPlace[]> {
@@ -155,74 +150,6 @@ export function recentTemps(
     .filter((h): h is TempHistory => h !== null);
 }
 
-/** Open-Meteo 모델 예보와 그 모델의 기온이 닿는 마지막 시각 */
-export interface ModelReach {
-  forecast: ProviderForecast;
-  reach: number;
-}
-
-/** Open-Meteo 모델마다 기온이 닿는 마지막 시각. 날짜마다 다시 구하지 않게 한 번만 구한다. */
-export function openMeteoReach(forecasts: ProviderForecast[]): ModelReach[] {
-  return forecasts.filter((f) => OPEN_METEO_PROVIDERS.has(f.provider)).map((forecast) => {
-    let reach = -Infinity;
-    for (const s of forecast.slots) if (s.temp !== null && s.t > reach) reach = s.t;
-    return { forecast, reach };
-  });
-}
-
-/**
- * 하루 [from, to): 그 날 마지막 정시까지 기온이 닿는 모델(먼 날일수록 줄어든다)과 그 모델들의 시간별 평균 기온.
- * 닿는 모델이 없으면 temps는 null.
- */
-export function coveringDay(
-  models: ModelReach[],
-  range: { from: number; to: number },
-): { covering: ProviderForecast[]; temps: TempHistory | null } {
-  const lastHour = Math.floor((range.to - 1) / 3600) * 3600;
-  const covering = models.filter((m) => m.reach >= lastHour).map((m) => m.forecast);
-  return { covering, temps: covering.length > 0 ? meanTempSeries(covering, range) : null };
-}
-
-/**
- * [from, to)의 정시마다 Open-Meteo 모델 평균 기온(앞뒤 빈 시간은 잘라 낸다).
- * 값이 가장 많은 모델의 TEMP_HISTORY_MIN_COVERAGE보다 적게 가진 모델은 뺀다.
- * 한 소스라도 빠진 시간은 평균의 구성이 달라지므로 비워 둔다.
- */
-export function meanTempSeries(
-  forecasts: ProviderForecast[],
-  range: { from: number; to: number },
-): TempHistory | null {
-  const from = Math.ceil(range.from / 3600) * 3600;
-  const to = range.to;
-  const series = forecasts.filter((f) => OPEN_METEO_PROVIDERS.has(f.provider)).map((f) => ({
-    provider: f.provider,
-    temps: new Map(
-      f.slots.filter((s) => s.temp !== null && s.t >= from && s.t < to).map((s) => [s.t, s.temp!]),
-    ),
-  }));
-  const most = Math.max(0, ...series.map((s) => s.temps.size));
-  if (most === 0) return null;
-  const used = series.filter((s) => s.temps.size >= most * TEMP_HISTORY_MIN_COVERAGE);
-
-  const temps: Array<number | null> = [];
-  for (let t = from; t < to; t += 3600) {
-    const values = used.map((s) => s.temps.get(t));
-    temps.push(
-      values.every((v) => v !== undefined)
-        ? Math.round(values.reduce((a, b) => a + b!, 0) / values.length * 10) / 10
-        : null,
-    );
-  }
-  const first = temps.findIndex((v) => v !== null);
-  if (first < 0) return null;
-  const last = temps.findLastIndex((v) => v !== null);
-  return {
-    providers: used.map((s) => s.provider),
-    start: from + first * 3600,
-    temps: temps.slice(first, last + 1),
-  };
-}
-
 /**
  * 오늘부터 DAILY_DAYS개 현지 날짜의 비 소식과 하루 기온.
  * 비 소식은 오늘이면 지금 시각이 속한 시간부터 자정까지, 기온은 0시부터 자정까지 본다.
@@ -249,6 +176,16 @@ export function dailyRain(
     }
   }
   return days;
+}
+
+/** 어제·오늘·내일 하루 날씨 (기온 탭 3일 보기) */
+export function aroundDays(
+  forecasts: ProviderForecast[],
+  opts: { nowSec: number; tz: string; threshold: number },
+): TripDayWeather[] {
+  const builder = new DayWeatherBuilder(forecasts, opts);
+  const today = localDateOf(opts.nowSec, opts.tz);
+  return AROUND_DAYS.map((d) => builder.day(formatLocalDate(addDays(today, d))));
 }
 
 /** 오늘 남은 시간 브리핑 (요약 알림 문구) */
@@ -311,6 +248,7 @@ export function buildToday(
         tempHistory: tempHistory(forecasts, opts),
         recentTemps: recentTemps(forecasts, opts),
         days: dailyRain(forecasts, opts),
+        around: aroundDays(forecasts, opts),
       };
     }),
   };

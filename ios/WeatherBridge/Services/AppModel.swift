@@ -2,7 +2,7 @@ import Foundation
 import WeatherCore
 
 enum AppTab: Hashable {
-    case today, compare, trips, settings
+    case weather, temperature, trips, settings
 }
 
 /// 앱 전체 상태: 로그인(익명), 집·회사, 설정, 오늘 예보, 여행, 기기 등록.
@@ -34,10 +34,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshingTrips = false
     /// 잠깐 보여줄 안내 (저장 실패 등)
     @Published var notice: String?
-    /// 오늘 화면에서 비교 탭으로 바로 갈 때 바꾼다
-    @Published var selectedTab: AppTab = .today
-    /// 비교 탭에서 보여줄 장소
-    @Published var comparePlace: PlaceKind = .home
+    /// 날씨 탭 카드에서 기온 탭으로 바로 갈 때 바꾼다
+    @Published var selectedTab: AppTab = .weather
+    /// 날씨·기온 탭이 함께 보는 장소 (장면 상태로 기억한다 — ContentView)
+    @Published var focusedPlace: PlaceKind = .home
+    /// 기온 탭 보기
+    @Published var temperatureMode: TemperatureMode = .threeDay
 
     let apnsEnvironment: ApnsEnvironment
     let appVersion: String
@@ -83,10 +85,11 @@ final class AppModel: ObservableObject {
         )
     }
 
-    /// 비교 탭의 그 장소로 바로 간다
-    func openCompare(_ kind: PlaceKind) {
-        comparePlace = kind
-        selectedTab = .compare
+    /// 기온 탭의 그 장소·보기로 바로 간다 (값만 바꾸고 움직임은 화면이 건다, D25)
+    func openTemperature(_ kind: PlaceKind, mode: TemperatureMode) {
+        focusedPlace = kind
+        temperatureMode = mode
+        selectedTab = .temperature
     }
 
     // MARK: 시작
