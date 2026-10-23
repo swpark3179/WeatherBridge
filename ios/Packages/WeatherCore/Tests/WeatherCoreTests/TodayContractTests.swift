@@ -98,6 +98,8 @@ import Testing
         for index in today.places.indices {
             today.places[index].tempHistory = nil
             today.places[index].recentTemps = nil
+            // 3일 보기(around)는 7일 기온 비교보다 나중에 생겼다
+            today.places[index].around = nil
             today.places[index].days = today.places[index].days?.map { day in
                 var day = day
                 day.temps = nil
