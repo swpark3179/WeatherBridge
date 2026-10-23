@@ -11,6 +11,7 @@ struct PlaceSearchOptions {
 
 /// 위치 카드 (Form 한 줄): 지도 핀, 이름, 주소, "바꾸기". 누르면 검색 시트가 열리고,
 /// 고르면 시트가 닫힌 뒤 카드가 새 위치로 바뀐다(지도가 옮겨 가고 햅틱).
+/// 고른 곳을 찾지 못해 넓혀 찾았으면 지도에 핀 대신 원을 그리고 "근처로 정했어요"를 덧붙인다(D28).
 struct PlaceField: View {
     /// 보여 줄 위치. 없으면 빈 카드
     let place: PickedPlace?
@@ -24,6 +25,8 @@ struct PlaceField: View {
     /// 시트에서 고른 위치. 시트가 다 닫힌 뒤 적용해야 카드가 바뀌는 모습이 보인다
     @State private var pending: PickedPlace?
     @State private var picks = 0
+    /// 마지막으로 고른 곳을 넓혀 찾았는지 (햅틱을 고른다)
+    @State private var pickedApproximate = false
 
     var body: some View {
         Button {
@@ -31,7 +34,7 @@ struct PlaceField: View {
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 if let coordinate = place?.coordinate {
-                    PlaceMap(coordinate: coordinate, label: place?.label ?? "")
+                    PlaceMap(coordinate: coordinate, label: place?.label ?? "", approximate: place?.approximateArea != nil)
                         .motionTransition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
                 HStack(spacing: 12) {
@@ -64,6 +67,14 @@ struct PlaceField: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
+                if let area = place?.approximateArea {
+                    Label("정확한 건물을 찾지 못해 \(area) 근처로 정했어요 · 지도에서 확인해 주세요", systemImage: "scope")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .motionTransition(.opacity.combined(with: .offset(y: -6)))
+                }
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())
@@ -73,7 +84,7 @@ struct PlaceField: View {
         .sheet(isPresented: $searching, onDismiss: applyPending) {
             PlaceSearchSheet(options: options) { pending = $0 }
         }
-        .sensoryFeedback(.success, trigger: picks)
+        .sensoryFeedback(trigger: picks) { _, _ in pickedApproximate ? SensoryFeedback.warning : SensoryFeedback.success }
     }
 
     private var title: String {
@@ -88,28 +99,39 @@ struct PlaceField: View {
     private func applyPending() {
         guard let pending else { return }
         self.pending = nil
+        pickedApproximate = pending.approximateArea != nil
         picks += 1
         withMotion(Motion.spring, reduceMotion: reduceMotion, reduced: Motion.fade) { onPick(pending) }
     }
 }
 
-/// 작은 지도: 고른 곳에 핀. 위치가 바뀌면 카메라가 옮겨 간다. 누르는 것은 카드가 받는다.
+/// 작은 지도: 고른 곳에 핀(넓혀 찾았으면 원). 위치가 바뀌면 카메라가 옮겨 간다. 누르는 것은 카드가 받는다.
 private struct PlaceMap: View {
     let coordinate: Coordinate
     let label: String
+    /// 넓혀 찾은 곳이면 핀 대신 그 근처를 원으로
+    let approximate: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var camera: MapCameraPosition
 
-    init(coordinate: Coordinate, label: String) {
+    init(coordinate: Coordinate, label: String, approximate: Bool) {
         self.coordinate = coordinate
         self.label = label
+        self.approximate = approximate
         _camera = State(initialValue: Self.position(coordinate))
     }
 
     var body: some View {
+        let center = CLLocationCoordinate2D(latitude: coordinate.lat, longitude: coordinate.lon)
         Map(position: $camera, interactionModes: []) {
-            Marker(label, coordinate: CLLocationCoordinate2D(latitude: coordinate.lat, longitude: coordinate.lon))
+            if approximate {
+                MapCircle(center: center, radius: 700)
+                    .foregroundStyle(Color.orange.opacity(0.2))
+                    .stroke(Color.orange, lineWidth: 2)
+            } else {
+                Marker(label, coordinate: center)
+            }
         }
         .frame(height: 140)
         .clipShape(RoundedRectangle(cornerRadius: 12))

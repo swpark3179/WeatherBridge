@@ -1,6 +1,6 @@
 import Foundation
 
-/// 이 기기에서 고른 장소 하나의 표시 정보: 이름, 주소, 약 1km 좌표, 시간대.
+/// 이 기기에서 고른 장소 하나의 표시 정보: 이름, 주소, 약 1km 좌표, 시간대, 넓혀 찾았는지.
 public struct RememberedPlace: Codable, Hashable, Sendable {
     /// 서버 장소 id(집·회사) 또는 여행 id. 지금 id와 다르면 쓰지 않는다
     public var id: String
@@ -12,13 +12,23 @@ public struct RememberedPlace: Codable, Hashable, Sendable {
     public var coordinate: Coordinate
     /// IANA 시간대 (알 때만)
     public var tz: String?
+    /// 고른 곳을 찾지 못해 넓혀 찾은 곳 ("명지국제5로"). 고른 곳 그대로면 nil (D28)
+    public var approximateArea: String?
 
-    public init(id: String, label: String, subtitle: String? = nil, coordinate: Coordinate, tz: String? = nil) {
+    public init(
+        id: String,
+        label: String,
+        subtitle: String? = nil,
+        coordinate: Coordinate,
+        tz: String? = nil,
+        approximateArea: String? = nil
+    ) {
         self.id = id
         self.label = label
         self.subtitle = subtitle
         self.coordinate = coordinate.rounded2
         self.tz = tz
+        self.approximateArea = approximateArea
     }
 }
 

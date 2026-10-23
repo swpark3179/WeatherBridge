@@ -97,6 +97,8 @@ struct PickedPlace: Equatable {
     var subtitle: String?
     var coordinate: Coordinate
     var timeZone: TimeZone?
+    /// 고른 곳을 지도가 찾지 못해 넓혀 찾은 곳 ("명지국제5로"). 고른 곳 그대로면 nil (D28)
+    var approximateArea: String?
 }
 
 extension PickedPlace {
@@ -106,12 +108,20 @@ extension PickedPlace {
             label: remembered.label,
             subtitle: remembered.subtitle,
             coordinate: remembered.coordinate,
-            timeZone: remembered.tz.flatMap(TimeZone.init(identifier:))
+            timeZone: remembered.tz.flatMap(TimeZone.init(identifier:)),
+            approximateArea: remembered.approximateArea
         )
     }
 
     func remembered(id: String, tz: String? = nil) -> RememberedPlace {
-        RememberedPlace(id: id, label: label, subtitle: subtitle, coordinate: coordinate, tz: tz ?? timeZone?.identifier)
+        RememberedPlace(
+            id: id,
+            label: label,
+            subtitle: subtitle,
+            coordinate: coordinate,
+            tz: tz ?? timeZone?.identifier,
+            approximateArea: approximateArea
+        )
     }
 }
 
@@ -155,29 +165,84 @@ final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDeleg
     @Published private(set) var failed = false
 
     private let completer = MKLocalSearchCompleter()
+    /// 결과를 먼저 보여줄 지역 (`.world`면 nil)
+    private let searchRegion: MKCoordinateRegion?
+    private let geocoder = CLGeocoder()
+
+    /// 넓혀 찾기는 이만큼까지만 (지오코딩은 호출 수가 제한된다)
+    private static let fallbackSeconds: TimeInterval = 10
+    private static let fallbackCalls = 12
 
     init(region: Region = .korea) {
-        super.init()
-        completer.delegate = self
-        completer.resultTypes = [.address, .pointOfInterest]
-        if region == .korea {
-            completer.region = MKCoordinateRegion(
+        searchRegion = region == .korea
+            ? MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 36.4, longitude: 127.8),
                 span: MKCoordinateSpan(latitudeDelta: 7, longitudeDelta: 7)
             )
+            : nil
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.address, .pointOfInterest]
+        if let searchRegion {
+            completer.region = searchRegion
         }
     }
 
-    /// 고른 제안의 좌표와 시간대
+    /// 고른 제안의 좌표와 시간대. 지도가 제안을 바로 찾지 못하면(한국 도로명 주소에서 잦다) 주소로 다시 찾고,
+    /// 그래도 없으면 도로·동·시군구로 넓혀 찾는다(`AddressQuery`, D28). 넓혀 찾았으면 `approximateArea`에 그곳 이름을 둔다.
     func place(for suggestion: Suggestion) async throws -> PickedPlace {
-        let response = try await MKLocalSearch(request: MKLocalSearch.Request(completion: suggestion.completion)).start()
-        guard let item = response.mapItems.first else { throw LocationProvider.LocationError.unavailable }
-        let c = item.placemark.coordinate
-        return PickedPlace(
+        if let item = try? await MKLocalSearch(request: MKLocalSearch.Request(completion: suggestion.completion)).start().mapItems.first {
+            return picked(suggestion, coordinate: item.placemark.coordinate, timeZone: item.timeZone, area: nil)
+        }
+        let deadline = Date().addingTimeInterval(Self.fallbackSeconds)
+        var calls = 0
+        for candidate in AddressQuery.candidates(title: suggestion.title, subtitle: suggestion.subtitle) {
+            try Task.checkCancellation()
+            guard calls < Self.fallbackCalls, Date() < deadline else { break }
+            if let found = await lookUp(candidate, calls: &calls) {
+                try Task.checkCancellation()
+                return picked(suggestion, coordinate: found.coordinate, timeZone: found.timeZone, area: candidate.area)
+            }
+        }
+        throw LocationProvider.LocationError.unavailable
+    }
+
+    /// 검색어 하나로 찾기: 지도 검색, 없으면 주소 지오코딩. 넓힌 검색어는 주소만 찾는다(같은 이름의 가게로 가지 않게).
+    private func lookUp(
+        _ candidate: AddressQuery.Candidate,
+        calls: inout Int
+    ) async -> (coordinate: CLLocationCoordinate2D, timeZone: TimeZone?)? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = candidate.query
+        request.resultTypes = candidate.isApproximate ? .address : [.address, .pointOfInterest]
+        if let searchRegion {
+            request.region = searchRegion
+        }
+        calls += 1
+        if let item = try? await MKLocalSearch(request: request).start().mapItems.first {
+            return (item.placemark.coordinate, item.timeZone)
+        }
+        guard !Task.isCancelled, calls < Self.fallbackCalls else { return nil }
+        calls += 1
+        let placemarks = try? await geocoder.geocodeAddressString(
+            candidate.query, in: nil, preferredLocale: Locale(identifier: "ko_KR")
+        )
+        guard let placemark = placemarks?.first, let location = placemark.location else { return nil }
+        return (location.coordinate, placemark.timeZone)
+    }
+
+    private func picked(
+        _ suggestion: Suggestion,
+        coordinate c: CLLocationCoordinate2D,
+        timeZone: TimeZone?,
+        area: String?
+    ) -> PickedPlace {
+        PickedPlace(
             label: suggestion.title,
             subtitle: suggestion.subtitle.isEmpty ? nil : suggestion.subtitle,
             coordinate: Coordinate(lat: c.latitude, lon: c.longitude),
-            timeZone: item.timeZone
+            timeZone: timeZone,
+            approximateArea: area
         )
     }
 

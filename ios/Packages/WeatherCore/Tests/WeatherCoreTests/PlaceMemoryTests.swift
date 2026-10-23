@@ -49,4 +49,24 @@ import Testing
         let data = try JSONEncoder().encode(memory)
         #expect(try JSONDecoder().decode(PlaceMemory.self, from: data) == memory)
     }
+
+    @Test func remembersThatAPlaceWasApproximate() throws {
+        var memory = PlaceMemory()
+        memory.remember(
+            RememberedPlace(id: "office-1", label: "명지국제5로 90", coordinate: cityHall, approximateArea: "명지국제5로"),
+            as: .place(.office)
+        )
+        let data = try JSONEncoder().encode(memory)
+        let decoded = try JSONDecoder().decode(PlaceMemory.self, from: data)
+        #expect(decoded.place(.place(.office), id: "office-1")?.approximateArea == "명지국제5로")
+    }
+
+    /// 넓혀 찾기 전에 저장한 기억에는 approximateArea가 없다
+    @Test func readsMemoryWithoutApproximateArea() throws {
+        let json = #"{"entries":{"home":{"id":"home-1","label":"집","coordinate":{"lat":37.57,"lon":126.98}}}}"#
+        let memory = try JSONDecoder().decode(PlaceMemory.self, from: Data(json.utf8))
+        let home = try #require(memory.place(.place(.home), id: "home-1"))
+        #expect(home.approximateArea == nil)
+        #expect(home.label == "집")
+    }
 }
