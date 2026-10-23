@@ -146,12 +146,15 @@ let addressQueryCases: [AddressQueryCase] = [
         let found = AddressQuery.candidates(title: example.title, subtitle: example.subtitle)
         #expect(found == example.expected)
         // 그대로 찾는 검색어가 늘 먼저다
-        if let firstApproximate = found.firstIndex(where: \.isApproximate) {
-            #expect(found[firstApproximate...].allSatisfy(\.isApproximate))
+        if let firstApproximate = found.firstIndex(where: { $0.isApproximate }) {
+            let approximateAfter = found[firstApproximate...].allSatisfy { $0.isApproximate }
+            #expect(approximateAfter)
         }
+        let noEmptyQuery = found.allSatisfy { !$0.query.isEmpty }
+        let queries = Set(found.map { $0.query })
         #expect(found.count <= AddressQuery.limit)
-        #expect(found.allSatisfy { !$0.query.isEmpty })
-        #expect(Set(found.map(\.query)).count == found.count)
+        #expect(noEmptyQuery)
+        #expect(queries.count == found.count)
     }
 
     @Test func emptyTitleHasNoCandidates() {
