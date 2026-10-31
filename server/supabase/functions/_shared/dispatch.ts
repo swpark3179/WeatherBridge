@@ -1,5 +1,8 @@
 /**
  * 요약 알림 발송. pg_cron이 매분 dispatch 함수를 부르면, 예정 시각이 된 사용자에게 하루 한 번 보낸다.
+ * - 비 소식이 있는 날(집·회사 중 한 곳이라도 오늘 남은 시간에 강조 기준을 넘는 비 시간대)에만 보낸다.
+ *   비 소식이 없으면 보내지 않고 `skipped`(no_rain)로 기록한다.
+ * - 예보를 하나도 받지 못했으면 "비 없음"으로 단정하지 않고 다시 시도한다.
  * - 보내기 전에 dispatch_log에 먼저 기록해(claim) 중복 발송을 막는다.
  * - 일시적인 실패(429, 5xx, 네트워크)는 예정 시각부터 15분 안에서 최대 3번까지 다시 시도한다.
  */
@@ -43,10 +46,11 @@ export interface DispatchReport {
   sent: number;
   retry: number;
   failed: number;
+  /** 보내지 않은 사용자 수 (비 소식 없음·기기 없음·장소 없음) */
   skipped: number;
   errors: string[];
-  /** dryRun일 때 만들어 본 알림 */
-  previews: Array<{ user: string; localDate: string | null; payload: unknown }>;
+  /** dryRun일 때 만들어 본 알림. rain이 false면 실제로는 보내지 않는다. */
+  previews: Array<{ user: string; localDate: string | null; rain: boolean; payload: unknown }>;
 }
 
 /** 사용자 ID 앞 8자리만 로그·응답에 남긴다 */
@@ -85,6 +89,10 @@ async function buildPayload(
   });
   return {
     payload: summaryPayload(briefing, localDate),
+    /** 비 소식이 있는 날인지 (이때만 보낸다) */
+    rain: briefing.state.highlight,
+    /** 어느 장소의 예보도 받지 못함: "비 없음"이 아니라 알 수 없음 */
+    noForecast: loaded.every((l) => l.forecasts.length === 0),
     errors: loaded.flatMap((l) => l.errors.map((e) => `${l.place.kind}: ${e}`)),
   };
 }
@@ -170,6 +178,7 @@ export async function runDispatch(deps: Deps, opts: DispatchOptions): Promise<Di
           report.previews.push({
             user: short(s.userId),
             localDate: due?.localDate ?? null,
+            rain: built?.rain ?? false,
             payload: built?.payload ?? null,
           });
         }
@@ -184,6 +193,7 @@ export async function runDispatch(deps: Deps, opts: DispatchOptions): Promise<Di
       report.previews.push({
         user: short(opts.userId),
         localDate: null,
+        rain: built?.rain ?? false,
         payload: built?.payload ?? null,
       });
     }
@@ -227,6 +237,24 @@ export async function runDispatch(deps: Deps, opts: DispatchOptions): Promise<Di
       if (!built) {
         await deps.repo.finishDispatch(claim.id, "skipped", {
           reason: devices.length ? "no_places" : "no_devices",
+        });
+        report.skipped++;
+        continue;
+      }
+      if (built.noForecast) {
+        const status = claim.attempts < MAX_ATTEMPTS ? "retry" : "failed";
+        await deps.repo.finishDispatch(claim.id, status, {
+          reason: "no_forecast",
+          forecastErrors: built.errors,
+        });
+        report[status]++;
+        continue;
+      }
+      if (!built.rain) {
+        // 비 소식이 없는 날은 알림 없음
+        await deps.repo.finishDispatch(claim.id, "skipped", {
+          reason: "no_rain",
+          forecastErrors: built.errors,
         });
         report.skipped++;
         continue;

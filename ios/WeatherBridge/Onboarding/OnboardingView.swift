@@ -71,7 +71,7 @@ struct OnboardingView: View {
         switch step ?? firstStep {
         case .home: "집과 회사의 시간대별 강수확률을 여러 예보에서 모아 알려 드려요. 먼저 집 위치를 정해 주세요."
         case .office: "회사(또는 자주 가는 곳) 위치를 정해 주세요."
-        case .summary: "매일 받을 요약 알림 시각을 정해 주세요."
+        case .summary: "비 오는 날 받을 알림 시각을 정해 주세요."
         }
     }
 }
@@ -111,12 +111,12 @@ struct SummarySetupView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("매일 요약 알림 받기", isOn: $enabled.animation(reduceMotion ? nil : Motion.standard))
+                Toggle("비 오는 날 알림 받기", isOn: $enabled.animation(reduceMotion ? nil : Motion.standard))
                 if enabled {
                     DatePicker("받을 시각", selection: $time, displayedComponents: .hourAndMinute)
                 }
             } footer: {
-                Text("정한 시각에 집·회사의 오늘 강수 요약을 알림으로 보내 드려요. 설정에서 언제든 바꿀 수 있습니다.")
+                Text("비 소식이 있는 날에만 정한 시각에 집·회사의 오늘 강수 요약을 알림으로 보내 드려요. 비 소식이 없는 날은 알림이 없습니다. 설정에서 언제든 바꿀 수 있습니다.")
             }
 
             if let error {

@@ -54,7 +54,7 @@ struct SettingsView: View {
 
     private var summarySection: some View {
         Section {
-            Toggle("매일 요약 알림", isOn: $draft.summaryEnabled.animation(reduceMotion ? nil : Motion.standard))
+            Toggle("비 오는 날 알림", isOn: $draft.summaryEnabled.animation(reduceMotion ? nil : Motion.standard))
             if draft.summaryEnabled {
                 DatePicker("받을 시각", selection: clockBinding(\.summaryTime), displayedComponents: .hourAndMinute)
             }
@@ -65,7 +65,7 @@ struct SettingsView: View {
                 Text("알림 권한이 꺼져 있습니다. 설정 앱 → WeatherBridge → 알림에서 켜 주세요.")
                     .foregroundStyle(.orange)
             } else {
-                Text("정한 시각에 집·회사의 오늘 남은 시간 강수 요약을 보내 드려요.")
+                Text("비 소식이 있는 날에만 정한 시각에 집·회사의 오늘 남은 시간 강수 요약을 보내 드려요. 비 소식이 없는 날은 알림이 없습니다.")
             }
         }
     }
