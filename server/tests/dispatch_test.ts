@@ -65,17 +65,28 @@ function setup() {
   return repo;
 }
 
-/** 예보(Open-Meteo만)와 APNs 응답을 흉내 낸다. apnsStatuses는 차례로 돌려줄 상태 코드. */
-function fakes(apnsStatuses: Array<number | [number, string]>) {
+/**
+ * 예보(Open-Meteo만)와 APNs 응답을 흉내 낸다. apnsStatuses는 차례로 돌려줄 상태 코드.
+ * weather: rain이면 오후에 비, dry면 하루 종일 10% 이하, down이면 예보 서버 오류.
+ */
+function fakes(
+  apnsStatuses: Array<number | [number, string]>,
+  weather: "rain" | "dry" | "down" = "rain",
+) {
   const t0 = kst(2026, 10, 20, 7);
   const times = Array.from({ length: 18 }, (_, i) => t0 + i * H);
+  const rain = (high: number, low: number) =>
+    times.map((_, i) => (weather === "rain" && i >= 8 && i < 11 ? high : low));
   const forecast = routedFetch([
-    [/open-meteo/, () =>
-      openMeteoBody(times, {
-        ecmwf_ifs025: times.map((_, i) => (i >= 8 && i < 11 ? 80 : 10)),
-        ncep_gfs_seamless: times.map((_, i) => (i >= 8 && i < 11 ? 70 : 0)),
-        dwd_icon_seamless: times.map(() => 10),
-      })],
+    [
+      /open-meteo/,
+      () =>
+        weather === "down" ? new Response("unavailable", { status: 503 }) : openMeteoBody(times, {
+          ecmwf_ifs025: rain(80, 10),
+          ncep_gfs_seamless: rain(70, 0),
+          dwd_icon_seamless: times.map(() => 10),
+        }),
+    ],
   ]);
   const apnsCalls: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];
   const apnsFetch = (url: string, init: RequestInit) => {
@@ -263,8 +274,56 @@ Deno.test("dry run counts due users and previews one user's alert without side e
   assertEquals(r.previews.length, 1);
   assertEquals(r.previews[0].user, USER.slice(0, 8));
   assertEquals(r.previews[0].localDate, "2026-10-20");
+  assertEquals(r.previews[0].rain, true);
   assertEquals(repo.dispatches, []);
   assertEquals(f.apnsCalls.length, 0);
+});
+
+Deno.test("does not alert on a day without rain", async () => {
+  const repo = setup();
+  const apns = await apnsConfig();
+  const f = fakes([], "dry");
+  const at = kst(2026, 10, 20, 7, 0);
+
+  const r = await runDispatch(deps(repo, at, f.forecastFetch), { apns, apnsFetch: f.apnsFetch });
+  assertEquals([r.due, r.sent, r.skipped, r.errors], [1, 0, 1, []]);
+  assertEquals(f.apnsCalls.length, 0);
+  assertEquals(repo.dispatches.map((d) => [d.localDate, d.status]), [["2026-10-20", "skipped"]]);
+  assertEquals((repo.dispatches[0].detail as { reason: string }).reason, "no_rain");
+
+  // 같은 날 다음 분에도 다시 보지 않는다
+  const again = await runDispatch(deps(repo, at + 60, f.forecastFetch), {
+    apns,
+    apnsFetch: f.apnsFetch,
+  });
+  assertEquals([again.due, again.sent, again.skipped], [1, 0, 0]);
+  assertEquals(f.apnsCalls.length, 0);
+});
+
+Deno.test("retries instead of treating missing forecasts as no rain", async () => {
+  const repo = setup();
+  const apns = await apnsConfig();
+  const f = fakes([], "down");
+  const at = kst(2026, 10, 20, 7, 0);
+
+  const r = await runDispatch(deps(repo, at, f.forecastFetch), { apns, apnsFetch: f.apnsFetch });
+  assertEquals([r.retry, r.skipped, r.sent], [1, 0, 0]);
+  assertEquals(repo.dispatches[0].status, "retry");
+  assertEquals((repo.dispatches[0].detail as { reason: string }).reason, "no_forecast");
+  assertEquals(f.apnsCalls.length, 0);
+});
+
+Deno.test("dry run marks a day without rain as not sent", async () => {
+  const repo = setup();
+  const f = fakes([], "dry");
+  const r = await runDispatch(deps(repo, kst(2026, 10, 20, 7, 3), f.forecastFetch), {
+    apns: null,
+    dryRun: true,
+    userId: USER,
+  });
+  assertEquals(r.previews.length, 1);
+  assertEquals(r.previews[0].rain, false);
+  assertEquals(repo.dispatches, []);
 });
 
 Deno.test("dry run previews a user who has not turned summaries on", async () => {
